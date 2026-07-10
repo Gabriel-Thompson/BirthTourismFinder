@@ -1,0 +1,65 @@
+{
+  "priority_weights": {
+    "risk_score": 0.25,
+    "rarity_score": 0.08,
+    "confidence_score": 0.15,
+    "independent_marker_count": 0.08,
+    "independent_source_count": 0.08,
+    "cross_source_support": 0.08,
+    "relationship_density": 0.07,
+    "network_size": 0.07,
+    "bridge_entity_presence": 0.06,
+    "entity_resolution_confidence": 0.06,
+    "evidence_completeness": 0.05,
+    "temporal_concentration": 0.03,
+    "real_data_preference": 0.02
+  },
+  "priority_thresholds": {
+    "critical": 85,
+    "high": 65,
+    "medium": 45,
+    "low": 20
+  },
+  "confidence_thresholds": {
+    "very_high": 0.9,
+    "high": 0.75,
+    "medium": 0.55,
+    "low": 0.35
+  },
+  "evidence_completeness_weights": {
+    "primary_entity": 1.0,
+    "marker_evidence": 1.0,
+    "relationship_evidence": 1.0,
+    "source_provenance": 1.0,
+    "timeline_events": 1.0,
+    "aliases": 1.0,
+    "canonical_resolution": 1.0,
+    "network_context": 1.0,
+    "recommended_review": 1.0
+  },
+  "lead_deduplication_threshold": 0.85,
+  "real_data_preference_weight": 0.15,
+  "cross_source_weight": 0.1,
+  "network_weight": 0.1,
+  "bridge_entity_weight": 0.1,
+  "minimum_markers_for_lead_generation": 1,
+  "minimum_sources_for_high_confidence_lead": 2,
+  "cross_source_lead_thresholds": {
+    "minimum_matches": 1,
+    "minimum_real_matches": 1
+  },
+  "minimum_cross_source_evidence_completeness": 60,
+  "minimum_cross_source_entity_resolution_confidence": 0.75,
+  "package_priorities": ["CRITICAL", "HIGH"],
+  "enabled_lead_types": [
+    "ENTITY",
+    "NETWORK",
+    "CROSS_SOURCE_CLUSTER",
+    "ADDRESS_CLUSTER",
+    "BUSINESS_CLUSTER",
+    "PROPERTY_CLUSTER",
+    "COMMUNICATION_CLUSTER",
+    "TEMPORAL_CLUSTER"
+  ],
+  "default_dashboard_source_mode": "Real Data Only"
+}

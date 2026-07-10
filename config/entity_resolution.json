@@ -1,0 +1,27 @@
+{
+  "auto_merge_threshold": 0.95,
+  "review_threshold": 0.75,
+  "fuzzy_name_threshold": 0.9,
+  "address_similarity_threshold": 0.95,
+  "business_similarity_threshold": 0.9,
+  "person_similarity_threshold": 0.92,
+  "exact_phone_enabled": true,
+  "exact_email_enabled": true,
+  "exact_website_enabled": true,
+  "exact_parcel_enabled": true,
+  "require_secondary_evidence_for_person": true,
+  "require_secondary_evidence_for_business": true,
+  "maximum_block_size": 200,
+  "enabled_entity_types": [
+    "address",
+    "business",
+    "person",
+    "owner",
+    "registered_agent",
+    "officer",
+    "phone",
+    "email",
+    "website",
+    "property"
+  ]
+}

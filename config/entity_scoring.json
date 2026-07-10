@@ -1,0 +1,12 @@
+{
+  "direct_entity_id_match": 30,
+  "address_text_match": 8,
+  "phone_text_match": 6,
+  "supporting_evidence_match": 10,
+  "relationship_count_multiplier": 2,
+  "max_relationship_bonus": 20,
+  "max_score": 100,
+  "high_threshold": 70,
+  "medium_threshold": 35,
+  "low_threshold": 1
+}

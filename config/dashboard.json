@@ -1,0 +1,15 @@
+{
+  "theme": "local_workbench",
+  "page_size": 25,
+  "real_data_only": false,
+  "default_navigation": "Overview",
+  "default_filters": {
+    "priority": "All",
+    "status": "All",
+    "source_scope": "all"
+  },
+  "default_views": {
+    "queue_sort": "priority",
+    "reports_format": "markdown"
+  }
+}

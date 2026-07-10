@@ -1,0 +1,69 @@
+{
+  "baseline_mode": "REAL_ONLY",
+  "review_probability_thresholds": {
+    "routine_review": 0.15,
+    "elevated_review": 0.05,
+    "immediate_review": 0.01,
+    "extreme_outlier": 0.001,
+    "percentile_elevated": 0.95,
+    "percentile_immediate": 0.99,
+    "percentile_extreme": 0.999
+  },
+  "minimum_comparison_group_size": 5,
+  "enabled_statistical_models": [
+    "empirical_percentile",
+    "poisson",
+    "robust_z",
+    "iqr"
+  ],
+  "temporal_windows": [
+    3,
+    7,
+    30,
+    90,
+    365
+  ],
+  "address_context_adjustments": {
+    "SINGLE_FAMILY_RESIDENTIAL": 8,
+    "MULTIFAMILY_RESIDENTIAL": 3,
+    "APARTMENT_BUILDING": -3,
+    "EXACT_APARTMENT_OR_UNIT": 6,
+    "COMMERCIAL_PROPERTY": -6,
+    "OFFICE_BUILDING": -5,
+    "VIRTUAL_OFFICE_OR_MAILBOX": -4,
+    "GOVERNMENT_FACILITY": -6,
+    "REGISTERED_AGENT_SERVICE_ADDRESS": -5,
+    "UNKNOWN": 0
+  },
+  "property_context_adjustments": {
+    "UNKNOWN": 0,
+    "SINGLE_FAMILY_RESIDENTIAL": 4,
+    "COMMERCIAL_PROPERTY": -3
+  },
+  "communication_context_adjustments": {
+    "UNKNOWN": 0,
+    "COMMERCIAL_PROPERTY": -2,
+    "EXACT_APARTMENT_OR_UNIT": 3,
+    "VIRTUAL_OFFICE_OR_MAILBOX": -2
+  },
+  "maximum_positive_adjustment": 8,
+  "maximum_negative_adjustment": -8,
+  "insufficient_baseline_behavior": "LABEL_ONLY",
+  "real_data_only_default": true,
+  "compound_marker_strategy": "CONSERVATIVE_MEAN_OF_RAREST",
+  "percentile_thresholds": {
+    "elevated": 0.95,
+    "immediate": 0.99,
+    "extreme": 0.999
+  },
+  "z_score_thresholds": {
+    "elevated": 2.0,
+    "immediate": 3.0,
+    "extreme": 4.5
+  },
+  "robust_z_score_thresholds": {
+    "elevated": 2.5,
+    "immediate": 3.5,
+    "extreme": 5.0
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "shared_address_businesses": {
+    "enabled": true,
+    "threshold": 1,
+    "base_score": 25,
+    "description": "Multiple businesses sharing one address"
+  },
+  "shared_address_phones": {
+    "enabled": true,
+    "threshold": 1,
+    "base_score": 20,
+    "description": "Multiple phone numbers linked to one address"
+  },
+  "shared_address_websites": {
+    "enabled": true,
+    "threshold": 1,
+    "base_score": 10,
+    "description": "Multiple websites linked to one address"
+  },
+  "keyword_frequency": {
+    "enabled": true,
+    "threshold": 1,
+    "base_score": 25,
+    "description": "Repeated maternity/postpartum/travel keywords"
+  },
+  "known_pattern_addresses": {
+    "enabled": true,
+    "threshold": 1,
+    "base_score": 15,
+    "description": "Addresses listed in known_patterns"
+  }
+}

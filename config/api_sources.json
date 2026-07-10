@@ -1,0 +1,129 @@
+{
+  "sample_api": {
+    "source_name": "sample_api",
+    "base_url": "https://demo.example.invalid",
+    "endpoint": "/open-data/entities",
+    "query_params": {
+      "limit": 2
+    },
+    "response_format": "json",
+    "timeout_seconds": 5,
+    "retry_attempts": 2,
+    "retry_backoff_seconds": 0.1,
+    "rate_limit_per_minute": 60,
+    "mock_response_path": "data/raw/api/sample_api_response.json",
+    "entity_type": "business",
+    "field_map": {
+      "record_id": "id",
+      "display_name": "name",
+      "address": "address",
+      "website": "website",
+      "category": "category"
+    }
+  },
+  "sample_arcgis_parcels": {
+    "source_name": "sample_arcgis_parcels",
+    "base_url": "https://sampleserver.example.invalid",
+    "endpoint": "/arcgis/rest/services/Parcels/FeatureServer/0/query",
+    "query_params": {
+      "where": "1=1",
+      "outFields": "*",
+      "returnGeometry": "true"
+    },
+    "response_format": "json",
+    "timeout_seconds": 5,
+    "retry_attempts": 2,
+    "retry_backoff_seconds": 0.1,
+    "rate_limit_per_minute": 60,
+    "mock_metadata_path": "data/raw/api/sample_arcgis_parcels_metadata.json",
+    "mock_response_path": "data/raw/api/sample_arcgis_parcels_response.json",
+    "field_map": {
+      "parcel_id": "PARCEL_ID",
+      "owner_name": "OWNER_NAME",
+      "situs_address": "SITUS_ADDRESS",
+      "mailing_address": "MAILING_ADDRESS",
+      "land_use": "LAND_USE",
+      "assessed_value": "ASSESSED_VALUE",
+      "sale_date": "SALE_DATE",
+      "sale_price": "SALE_PRICE",
+      "latitude": "y",
+      "longitude": "x"
+    }
+  },
+  "escambia_arcgis_parcels": {
+    "source_name": "escambia_arcgis_parcels",
+    "base_url": "https://www.escpa.org/ecpamap/",
+    "endpoint": "",
+    "query_params": {
+      "where": "1=1",
+      "outFields": "*",
+      "returnGeometry": "true",
+      "resultRecordCount": 100
+    },
+    "response_format": "json",
+    "timeout_seconds": 10,
+    "retry_attempts": 2,
+    "retry_backoff_seconds": 0.25,
+    "rate_limit_per_minute": 30,
+    "mock_metadata_path": "data/raw/api/sample_arcgis_parcels_metadata.json",
+    "mock_response_path": "data/raw/api/sample_arcgis_parcels_response.json",
+    "field_map": {
+      "parcel_id": "PARCEL_ID",
+      "owner_name": "OWNER_NAME",
+      "situs_address": "SITUS_ADDRESS",
+      "mailing_address": "MAILING_ADDRESS",
+      "land_use": "LAND_USE",
+      "assessed_value": "ASSESSED_VALUE",
+      "sale_date": "SALE_DATE",
+      "sale_price": "SALE_PRICE",
+      "latitude": "y",
+      "longitude": "x"
+    }
+  },
+  "florida_county_arcgis_parcels": {
+    "source_name": "florida_county_arcgis_parcels",
+    "source_type": "arcgis",
+    "live_access_allowed": true,
+    "base_url": "https://maps.hillsboroughcounty.org",
+    "endpoint": "/arcgis/rest/services/InfoLayers/HC_ParcelsPublic/FeatureServer/0",
+    "query_endpoint": "/arcgis/rest/services/InfoLayers/HC_ParcelsPublic/FeatureServer/0/query",
+    "default_limit": 100,
+    "page_size": 100,
+    "max_records": 1000,
+    "query_params": {
+      "where": "1=1",
+      "outFields": "STRAP,OWNER,ADDR_1,ADDR_2,CITY,STATE,ZIP,SITE_ADDR,SITE_CITY,SITE_ZIP,DOR_CODE,ASD_VAL,S_DATE,S_AMT",
+      "returnGeometry": "false"
+    },
+    "response_format": "json",
+    "timeout_seconds": 15,
+    "retry_attempts": 2,
+    "retry_backoff_seconds": 0.5,
+    "rate_limit_per_minute": 30,
+    "prefer_live_fetch": true,
+    "fallback_to_mock_on_error": true,
+    "mock_metadata_path": "data/raw/api/sample_arcgis_parcels_metadata.json",
+    "mock_response_path": "data/raw/api/sample_arcgis_parcels_response.json",
+    "notes": "Official Hillsborough County public parcel FeatureServer. Query-only use with small bounded requests. Default validation limit is 100 records; service metadata reports maxRecordCount 1000.",
+    "field_map": {
+      "parcel_id": "STRAP",
+      "owner_name": "OWNER",
+      "situs_address": [
+        "SITE_ADDR",
+        "SITE_CITY",
+        "SITE_ZIP"
+      ],
+      "mailing_address": [
+        "ADDR_1",
+        "ADDR_2",
+        "CITY",
+        "STATE",
+        "ZIP"
+      ],
+      "land_use": "DOR_CODE",
+      "assessed_value": "ASD_VAL",
+      "sale_date": "S_DATE",
+      "sale_price": "S_AMT"
+    }
+  }
+}

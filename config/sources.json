@@ -1,0 +1,139 @@
+{
+  "synthetic": {
+    "source_name": "synthetic",
+    "source_type": "generated_dataset",
+    "access_method": "local_generator",
+    "live_access_allowed": false,
+    "terms_review_required": false,
+    "review_document": "docs/source_reviews/synthetic.md",
+    "imported_at": "2026-07-08T00:00:00Z",
+    "data_path": "data/raw/synthetic",
+    "processed_outputs": [
+      "data/processed/business_entities.parquet",
+      "data/processed/properties.parquet",
+      "data/processed/web_leads.parquet",
+      "data/processed/known_patterns.parquet"
+    ],
+    "notes": "Synthetic local test data generated within the repository. No live services or external scraping permitted."
+  },
+  "manual_csv": {
+    "source_name": "manual_csv",
+    "source_type": "manual_import",
+    "access_method": "local_file_drop",
+    "live_access_allowed": false,
+    "terms_review_required": false,
+    "review_document": "docs/source_reviews/manual_csv.md",
+    "imported_at": "2026-07-08T00:00:00Z",
+    "data_path": "data/raw/manual",
+    "processed_outputs": [
+      "data/processed/manual_entities.csv",
+      "data/processed/manual_relationships.csv"
+    ],
+    "notes": "Manual CSV imports are limited to local files placed in the workspace."
+  },
+  "sunbiz_local_file": {
+    "source_name": "sunbiz_local_file",
+    "source_type": "local_registry_extract",
+    "access_method": "local_file_only",
+    "live_access_allowed": false,
+    "terms_review_required": true,
+    "review_document": "docs/source_reviews/sunbiz.md",
+    "imported_at": "2026-07-08T00:00:00Z",
+    "data_path": "data/raw/sunbiz/sunbiz_entities.csv",
+    "processed_outputs": [
+      "data/processed/sunbiz_entities.csv",
+      "data/processed/sunbiz_relationships.csv"
+    ],
+    "notes": "Use only pre-downloaded local files. Do not access Sunbiz live services from this project."
+  },
+  "county_property_local_file": {
+    "source_name": "county_property_local_file",
+    "source_type": "local_property_export",
+    "access_method": "local_file_only",
+    "live_access_allowed": false,
+    "terms_review_required": true,
+    "review_document": "docs/source_reviews/county_property.md",
+    "imported_at": "2026-07-08T00:00:00Z",
+    "data_path": "data/raw/county_property/property_records.csv",
+    "processed_outputs": [
+      "data/processed/county_property_entities.csv",
+      "data/processed/county_property_relationships.csv"
+    ],
+    "notes": "Use only manually downloaded county property files saved locally. No scraping or live access is permitted."
+  },
+  "county_clerk_local_file": {
+    "source_name": "county_clerk_local_file",
+    "source_type": "local_clerk_export",
+    "access_method": "local_file_only",
+    "live_access_allowed": false,
+    "terms_review_required": true,
+    "review_document": "docs/source_reviews/county_clerk.md",
+    "imported_at": "2026-07-08T00:00:00Z",
+    "data_path": "data/raw/county_clerk/clerk_records.csv",
+    "processed_outputs": [
+      "data/processed/county_clerk_entities.csv",
+      "data/processed/county_clerk_relationships.csv"
+    ],
+    "notes": "Use only manually downloaded county clerk files saved locally. No scraping or live access is permitted."
+  },
+  "sample_api": {
+    "source_name": "sample_api",
+    "source_type": "official_api_demo",
+    "access_method": "official_api_or_mocked_response",
+    "live_access_allowed": true,
+    "terms_review_required": true,
+    "review_document": "docs/source_reviews/sample_api.md",
+    "imported_at": "2026-07-08T00:00:00Z",
+    "data_path": "data/raw/api/sample_api_response.json",
+    "processed_outputs": [
+      "data/processed/api_entities.csv",
+      "data/processed/api_relationships.csv"
+    ],
+    "notes": "Safe sample official API connector configuration using a local mocked response. Real live access must remain limited to approved official APIs."
+  },
+  "sample_arcgis_parcels": {
+    "source_name": "sample_arcgis_parcels",
+    "source_type": "official_arcgis_demo",
+    "access_method": "official_arcgis_rest_or_mocked_response",
+    "live_access_allowed": true,
+    "terms_review_required": true,
+    "review_document": "docs/source_reviews/sample_arcgis_parcels.md",
+    "imported_at": "2026-07-08T00:00:00Z",
+    "data_path": "data/raw/api/sample_arcgis_parcels_response.json",
+    "processed_outputs": [
+      "data/processed/arcgis_entities.csv",
+      "data/processed/arcgis_relationships.csv"
+    ],
+    "notes": "Safe sample ArcGIS REST connector configuration using a local mocked response. Real live access must remain limited to approved official GIS endpoints."
+  },
+  "escambia_arcgis_parcels": {
+    "source_name": "escambia_arcgis_parcels",
+    "source_type": "official_arcgis_candidate",
+    "access_method": "official_county_gis_map_reviewed_mock_only",
+    "live_access_allowed": false,
+    "terms_review_required": true,
+    "review_document": "docs/source_reviews/county_property.md",
+    "imported_at": "2026-07-09T00:00:00Z",
+    "data_path": "data/raw/api/sample_arcgis_parcels_response.json",
+    "processed_outputs": [
+      "data/processed/arcgis_entities.csv",
+      "data/processed/arcgis_relationships.csv"
+    ],
+    "notes": "Escambia County public GIS map was reviewed, but a clearly documented ArcGIS REST parcel query endpoint and explicit automated-access allowance were not confirmed from the reviewed public pages. Live access remains disabled; use sample or mocked data only until the source is explicitly approved."
+  },
+  "florida_county_arcgis_parcels": {
+    "source_name": "florida_county_arcgis_parcels",
+    "source_type": "official_arcgis_public_parcels",
+    "access_method": "official_arcgis_rest_query",
+    "live_access_allowed": true,
+    "terms_review_required": true,
+    "review_document": "docs/source_reviews/county_property.md",
+    "imported_at": "2026-07-09T00:00:00Z",
+    "data_path": "https://maps.hillsboroughcounty.org/arcgis/rest/services/InfoLayers/HC_ParcelsPublic/FeatureServer/0",
+    "processed_outputs": [
+      "data/processed/arcgis_entities.csv",
+      "data/processed/arcgis_relationships.csv"
+    ],
+    "notes": "Official Hillsborough County public parcel FeatureServer layer onboarded as the first live ArcGIS source. Query access is publicly exposed on the county ArcGIS REST directory and the service description states the parcel map service is for general use with confidential data masked. Use small bounded queries and treat outputs as investigative leads only."
+  }
+}

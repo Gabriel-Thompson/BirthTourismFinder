@@ -1,0 +1,148 @@
+{
+  "risk_bands": {
+    "high": 70,
+    "medium": 35,
+    "low": 1
+  },
+  "confidence_bands": {
+    "very_high": 0.9,
+    "high": 0.75,
+    "medium": 0.55,
+    "low": 0.35
+  },
+  "markers": {
+    "shared_address_businesses": {
+      "enabled": true,
+      "weight": 18,
+      "minimum_confidence": 0.65,
+      "minimum_support": 2,
+      "minimum_sources": 1
+    },
+    "mailbox_address_cluster": {
+      "enabled": true,
+      "weight": 16,
+      "minimum_confidence": 0.6,
+      "minimum_support": 2,
+      "minimum_sources": 1
+    },
+    "mailing_address_reuse": {
+      "enabled": true,
+      "weight": 14,
+      "minimum_confidence": 0.6,
+      "minimum_support": 2,
+      "minimum_sources": 1
+    },
+    "shared_phone": {
+      "enabled": true,
+      "weight": 14,
+      "minimum_confidence": 0.65,
+      "minimum_support": 2,
+      "minimum_sources": 1
+    },
+    "shared_email": {
+      "enabled": true,
+      "weight": 12,
+      "minimum_confidence": 0.65,
+      "minimum_support": 2,
+      "minimum_sources": 1
+    },
+    "shared_website": {
+      "enabled": true,
+      "weight": 10,
+      "minimum_confidence": 0.65,
+      "minimum_support": 2,
+      "minimum_sources": 1
+    },
+    "similar_business_names": {
+      "enabled": true,
+      "weight": 11,
+      "minimum_confidence": 0.55,
+      "minimum_support": 2,
+      "minimum_sources": 1
+    },
+    "arcgis_owner_in_business_records": {
+      "enabled": true,
+      "weight": 20,
+      "minimum_confidence": 0.7,
+      "minimum_support": 1,
+      "minimum_sources": 2
+    },
+    "county_clerk_party_in_business_records": {
+      "enabled": true,
+      "weight": 18,
+      "minimum_confidence": 0.7,
+      "minimum_support": 1,
+      "minimum_sources": 2
+    },
+    "cross_source_multi_source_address": {
+      "enabled": true,
+      "weight": 18,
+      "minimum_confidence": 0.75,
+      "minimum_support": 2,
+      "minimum_sources": 2
+    },
+    "cross_source_shared_identifier": {
+      "enabled": true,
+      "weight": 16,
+      "minimum_confidence": 0.75,
+      "minimum_support": 2,
+      "minimum_sources": 2
+    },
+    "cross_source_property_business_address": {
+      "enabled": true,
+      "weight": 20,
+      "minimum_confidence": 0.8,
+      "minimum_support": 2,
+      "minimum_sources": 2
+    },
+    "cross_source_owner_business": {
+      "enabled": true,
+      "weight": 20,
+      "minimum_confidence": 0.8,
+      "minimum_support": 2,
+      "minimum_sources": 2
+    },
+    "cross_source_owner_person": {
+      "enabled": true,
+      "weight": 22,
+      "minimum_confidence": 0.8,
+      "minimum_support": 2,
+      "minimum_sources": 2
+    },
+    "cross_source_clerk_business": {
+      "enabled": true,
+      "weight": 20,
+      "minimum_confidence": 0.8,
+      "minimum_support": 2,
+      "minimum_sources": 2
+    },
+    "cross_source_multi_source_cluster": {
+      "enabled": true,
+      "weight": 24,
+      "minimum_confidence": 0.8,
+      "minimum_support": 2,
+      "minimum_sources": 2
+    },
+    "dense_entity_cluster": {
+      "enabled": true,
+      "weight": 12,
+      "minimum_confidence": 0.55,
+      "minimum_support": 4,
+      "minimum_sources": 1
+    },
+    "bridge_entity": {
+      "enabled": true,
+      "weight": 15,
+      "minimum_confidence": 0.6,
+      "minimum_support": 3,
+      "minimum_sources": 2
+    },
+    "business_cluster_compound": {
+      "enabled": true,
+      "weight": 24,
+      "minimum_confidence": 0.75,
+      "minimum_support": 2,
+      "minimum_sources": 1
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "min_network_size": 2,
+  "max_score": 100,
+  "risk_weights": {
+    "fraud_marker_count": 6,
+    "relationship_density": 30,
+    "independent_source_count": 5,
+    "cross_source_matches": 4,
+    "entity_diversity": 3,
+    "bridge_entities": 5
+  },
+  "priority_thresholds": {
+    "critical": 85,
+    "high": 65,
+    "medium": 40
+  },
+  "confidence_thresholds": {
+    "very_high": 0.9,
+    "high": 0.75,
+    "medium": 0.55,
+    "low": 0.35
+  }
+}

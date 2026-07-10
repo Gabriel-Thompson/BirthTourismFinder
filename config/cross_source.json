@@ -1,0 +1,40 @@
+{
+  "minimum_independent_sources": 2,
+  "minimum_real_sources_for_marker": 2,
+  "exact_match_confidence": 0.97,
+  "compound_match_confidence": 0.88,
+  "review_match_confidence": 0.76,
+  "cross_source_marker_weights": {
+    "exact_canonical_address": 18,
+    "exact_canonical_phone": 14,
+    "exact_canonical_email": 14,
+    "exact_canonical_website": 12,
+    "exact_canonical_business": 16,
+    "exact_canonical_owner": 16,
+    "property_situs_matches_business_address": 20,
+    "property_mailing_matches_business_address": 18,
+    "parcel_owner_matches_business_name": 20,
+    "parcel_owner_matches_person_with_secondary": 22,
+    "clerk_party_matches_business_person_with_secondary": 20
+  },
+  "minimum_evidence_completeness": 60,
+  "minimum_entity_resolution_confidence": 0.75,
+  "enabled_source_pairs": [],
+  "enabled_entity_types": [
+    "address",
+    "business",
+    "owner",
+    "person",
+    "registered_agent",
+    "officer",
+    "phone",
+    "email",
+    "website",
+    "property"
+  ],
+  "real_synthetic_separation": true,
+  "cross_source_lead_thresholds": {
+    "minimum_matches": 1,
+    "minimum_real_matches": 1
+  }
+}
