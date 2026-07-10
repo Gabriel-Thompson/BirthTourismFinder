@@ -105,6 +105,9 @@ def test_main_writes_export_files(tmp_path: Path) -> None:
 
     assert high_risk_export.exists()
     assert lead_summary_export.exists()
+    assert (exports_dir / "lead_summary.json").exists()
+    assert (exports_dir / "lead_summary.md").exists()
+    assert (exports_dir / "lead_summary.html").exists()
 
     high_risk_df = pd.read_csv(high_risk_export)
     summary_df = pd.read_csv(lead_summary_export)

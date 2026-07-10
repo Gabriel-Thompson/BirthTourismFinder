@@ -1509,6 +1509,307 @@ def main() -> None:
                 hide_index=True,
             )
 
+def main() -> None:
+    st.set_page_config(page_title="OpenFraud Analyst Workbench", layout="wide")
+    config = load_dashboard_config()
+    st.title("OpenFraud Analyst Workbench")
+    st.caption("Local analyst workstation for explainable investigative leads. All results are leads only, not proof of fraud.")
+
+    fraud_markers_df = load_fraud_markers()
+    fraud_marker_summary_df = load_fraud_marker_summary()
+    compatibility_report_df = load_report()
+    entities_df = load_entities()
+    relationships_df = load_relationships()
+    entity_risk_df = load_entity_risk()
+    canonical_entities_df = load_canonical_entities()
+    entity_aliases_df = load_entity_aliases()
+    investigation_leads_df = load_investigation_leads()
+    entity_timelines_df = load_entity_timelines()
+    evidence_packets_df = load_evidence_packets()
+    network_clusters_df = load_network_clusters()
+    network_summary_df = load_network_summary()
+    network_members_df = load_network_members()
+    network_edges_df = load_network_edges()
+    prioritized_leads_df = load_prioritized_leads()
+    investigation_summary_df = load_investigation_summary()
+    review_recommendations_df = load_review_recommendations()
+    cross_source_matches_df = load_cross_source_matches()
+    cross_source_diagnostics_df = load_cross_source_diagnostics()
+    cross_source_summary = load_cross_source_diagnostic_summary()
+    statistical_baselines_df = load_statistical_baselines()
+    statistical_rarity_df = load_statistical_rarity()
+    contextual_adjustments_df = load_contextual_adjustments()
+    statistical_summary = load_statistical_summary()
+    statistical_calibration_df = load_statistical_calibration_report()
+    analyst_state_df = load_analyst_state(WORKBENCH_ANALYST_STATE_PATH if WORKBENCH_ANALYST_STATE_PATH.exists() else ANALYST_STATE_PATH)
+    analyst_history_df = load_analyst_history(WORKBENCH_ANALYST_HISTORY_PATH if WORKBENCH_ANALYST_HISTORY_PATH.exists() else ANALYST_HISTORY_PATH)
+    saved_searches = load_saved_searches(WORKBENCH_SAVED_SEARCHES_PATH if WORKBENCH_SAVED_SEARCHES_PATH.exists() else SAVED_SEARCHES_PATH)
+    source_health_df = build_source_health_report(load_manifest_sources(), load_api_sources(), REPO_ROOT / "data" / "processed")
+
+    nav_options = [
+        "Overview",
+        "Investigation Queue",
+        "Fraud Markers",
+        "Statistical Risk",
+        "Network Intelligence",
+        "Cross Source Intelligence",
+        "Entity Explorer",
+        "Reports",
+        "Source Health",
+    ]
+    with st.sidebar:
+        navigation = st.radio(
+            "Navigation",
+            nav_options,
+            index=nav_options.index(config.get("default_navigation", "Overview")) if config.get("default_navigation", "Overview") in nav_options else 0,
+        )
+        real_data_only = st.toggle("Real Data Only", value=bool(config.get("real_data_only", False)))
+        scope_key = "real_only" if real_data_only else str(config.get("default_filters", {}).get("source_scope", "all"))
+        all_source_values = sorted(
+            {
+                token
+                for frame in [fraud_markers_df, entity_risk_df, entities_df, canonical_entities_df, prioritized_leads_df]
+                for column in ["source_name", "source_names", "sources"]
+                if column in frame.columns
+                for value in frame[column].astype(str).tolist()
+                for token in _token_set(value)
+            }
+        )
+        selected_sources = st.multiselect("Source Filter", options=all_source_values)
+        saved_search_labels = ["None", *[str(item.get("name", "")) for item in saved_searches]]
+        selected_saved_search = st.selectbox("Saved Search", saved_search_labels)
+
+    fraud_markers_df = filter_dataframe_by_source_scope(fraud_markers_df, scope_key, selected_sources)
+    entities_df = filter_dataframe_by_source_scope(entities_df, scope_key, selected_sources)
+    relationships_df = filter_dataframe_by_source_scope(relationships_df, scope_key, selected_sources)
+    entity_risk_df = filter_dataframe_by_source_scope(entity_risk_df, scope_key, selected_sources)
+    canonical_entities_df = filter_dataframe_by_source_scope(canonical_entities_df, scope_key, selected_sources)
+    entity_aliases_df = filter_dataframe_by_source_scope(entity_aliases_df, scope_key, selected_sources)
+    investigation_leads_df = filter_dataframe_by_source_scope(investigation_leads_df, scope_key, selected_sources)
+    entity_timelines_df = filter_dataframe_by_source_scope(entity_timelines_df, scope_key, selected_sources)
+    evidence_packets_df = filter_dataframe_by_source_scope(evidence_packets_df, scope_key, selected_sources)
+    network_clusters_df = filter_dataframe_by_source_scope(network_clusters_df, scope_key, selected_sources)
+    network_members_df = filter_dataframe_by_source_scope(network_members_df, scope_key, selected_sources)
+    network_edges_df = filter_dataframe_by_source_scope(network_edges_df, scope_key, selected_sources)
+    prioritized_leads_df = filter_dataframe_by_source_scope(prioritized_leads_df, scope_key, selected_sources)
+    cross_source_matches_df = filter_dataframe_by_source_scope(cross_source_matches_df, scope_key, selected_sources)
+    statistical_rarity_df = filter_dataframe_by_source_scope(statistical_rarity_df, scope_key, selected_sources)
+    contextual_adjustments_df = filter_dataframe_by_source_scope(contextual_adjustments_df, scope_key, selected_sources)
+
+    if selected_saved_search != "None":
+        search_config = next((item for item in saved_searches if str(item.get("name", "")) == selected_saved_search), {})
+        prioritized_leads_df = build_queue_view(
+            prioritized_leads_df,
+            priority=str(search_config.get("priority", "All")),
+            confidence=str(search_config.get("confidence", "All")),
+            source_name=str(search_config.get("source_name", "All")),
+            marker=str(search_config.get("marker", "All")),
+            network_mode=str(search_config.get("network_mode", "All")),
+            entity_type=str(search_config.get("entity_type", "All")),
+            status=str(search_config.get("status", "All")),
+        )
+
+    metrics = build_dashboard_metrics(fraud_markers_df, entities_df, relationships_df, entity_risk_df, investigation_leads_df)
+    summary_row = investigation_summary_df.iloc[0].to_dict() if not investigation_summary_df.empty else {}
+    metric_cols = st.columns(9)
+    metric_cols[0].metric("Total Leads", int(summary_row.get("total_leads", len(prioritized_leads_df))))
+    metric_cols[1].metric("Critical", int(summary_row.get("critical_leads", 0)))
+    metric_cols[2].metric("High", int(summary_row.get("high_leads", 0)))
+    metric_cols[3].metric("Cross Source", int(summary_row.get("cross_source_leads", 0)))
+    metric_cols[4].metric("Networks", int(summary_row.get("network_leads", 0)))
+    metric_cols[5].metric("Statistical Outliers", int((statistical_rarity_df.get("rarity_level", pd.Series(dtype=str)).astype(str).isin(["ELEVATED_REVIEW", "IMMEDIATE_REVIEW", "EXTREME_OUTLIER"])).sum()) if not statistical_rarity_df.empty else 0)
+    metric_cols[6].metric("Average Confidence", round(float(summary_row.get("average_confidence", metrics["avg_confidence"])), 2))
+    metric_cols[7].metric("Average Risk", round(float(summary_row.get("average_risk", metrics["avg_fraud_marker_score"])), 2))
+    metric_cols[8].metric("Real Data Coverage", int(prioritized_leads_df["contains_real_data"].astype(bool).sum()) if not prioritized_leads_df.empty and "contains_real_data" in prioritized_leads_df.columns else 0)
+
+    if navigation == "Overview":
+        left, right = st.columns(2)
+        with left:
+            st.subheader("Queue Snapshot")
+            st.dataframe(prioritized_leads_df.head(int(config.get("page_size", 25))), use_container_width=True, hide_index=True) if not prioritized_leads_df.empty else st.info("Run the pipeline to populate the queue.")
+        with right:
+            st.subheader("Recent History")
+            st.dataframe(analyst_history_df.tail(int(config.get("page_size", 25))), use_container_width=True, hide_index=True) if not analyst_history_df.empty else st.info("No analyst history yet.")
+        st.subheader("Saved Searches")
+        st.dataframe(pd.DataFrame(saved_searches), use_container_width=True, hide_index=True) if saved_searches else st.info("No saved searches.")
+
+    elif navigation == "Investigation Queue":
+        if prioritized_leads_df.empty:
+            st.info("Prioritized leads are not available yet.")
+        else:
+            filters = st.columns(8)
+            priority = filters[0].selectbox("Risk", ["All", *sorted(prioritized_leads_df["priority"].astype(str).unique())])
+            confidence = filters[1].selectbox("Confidence", ["All", *sorted(prioritized_leads_df["confidence"].astype(str).unique())])
+            status = filters[2].selectbox("Status", ["All", *sorted(prioritized_leads_df["status"].astype(str).unique())])
+            entity_type = filters[3].selectbox("Entity Type", ["All", *sorted(prioritized_leads_df["primary_entity_type"].astype(str).unique())])
+            source_name = filters[4].selectbox("Source", ["All", *sorted({token for value in prioritized_leads_df["source_names"].astype(str) for token in _token_set(value)})])
+            marker = filters[5].selectbox("Marker", ["All", *sorted({token for value in prioritized_leads_df["fraud_markers"].astype(str) for token in _token_set(value)})])
+            network_mode = filters[6].selectbox("Network", ["All", "With Network", "Without Network"])
+            reviewed_mode = filters[7].selectbox("Reviewed", ["All", "Reviewed", "Needs Review"])
+            queue_view = build_queue_view(
+                prioritized_leads_df,
+                priority=priority,
+                confidence=confidence,
+                source_name=source_name,
+                marker=marker,
+                network_mode=network_mode,
+                entity_type=entity_type,
+                status=status,
+                reviewed_mode=reviewed_mode,
+            )
+            st.dataframe(queue_view.head(int(config.get("page_size", 25))), use_container_width=True, hide_index=True)
+            with st.expander("Save Current Search"):
+                search_name = st.text_input("Search name")
+                if st.button("Save Search") and search_name.strip():
+                    new_searches = [item for item in saved_searches if str(item.get("name", "")) != search_name.strip()]
+                    new_searches.append({"name": search_name.strip(), "priority": priority, "confidence": confidence, "status": status, "entity_type": entity_type, "source_name": source_name, "marker": marker, "network_mode": network_mode})
+                    save_saved_searches(new_searches, SAVED_SEARCHES_PATH)
+                    st.success("Saved search written locally.")
+
+            selected_lead_id = st.selectbox("Lead", queue_view["lead_id"].astype(str).tolist() or prioritized_leads_df["lead_id"].astype(str).tolist())
+            selected_lead = prioritized_leads_df[prioritized_leads_df["lead_id"].astype(str) == selected_lead_id].iloc[0]
+            entity_id = str(selected_lead.get("primary_entity_id", ""))
+            st.subheader("Why")
+            st.write(str(selected_lead.get("explanation", "")))
+            st.write(str(selected_lead.get("recommended_review", "")))
+            state_col, notes_col = st.columns(2)
+            with state_col:
+                new_status = st.selectbox("Lead Status", ["NEW", "IN_REVIEW", "REVIEWED", "CLOSED"], index=0 if str(selected_lead.get("status", "NEW")) not in ["NEW", "IN_REVIEW", "REVIEWED", "CLOSED"] else ["NEW", "IN_REVIEW", "REVIEWED", "CLOSED"].index(str(selected_lead.get("status", "NEW"))))
+                reviewer = st.text_input("Reviewer", value=str(selected_lead.get("reviewer", "")))
+                follow_up = st.selectbox("Follow-up", ["", "Yes", "No"], index=0)
+                bookmark = st.toggle("Bookmark", value=str(selected_lead.get("bookmark", "false")).lower() == "true")
+            with notes_col:
+                disposition = st.text_input("Disposition", value=str(selected_lead.get("disposition", "")))
+                priority_override = st.text_input("Priority Override", value=str(selected_lead.get("priority_override", "")))
+                notes = st.text_area("Notes", value=str(selected_lead.get("analyst_notes", "")))
+                if st.button("Save Analyst State"):
+                    updated_state, updated_history = update_analyst_record(
+                        analyst_state_df,
+                        analyst_history_df,
+                        lead_id=selected_lead_id,
+                        reviewer=reviewer,
+                        updates={
+                            "status": new_status,
+                            "reviewer": reviewer,
+                            "follow_up_needed": follow_up,
+                            "bookmark": "true" if bookmark else "false",
+                            "disposition": disposition,
+                            "priority_override": priority_override,
+                            "analyst_notes": notes,
+                            "review_date": pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d"),
+                        },
+                    )
+                    persist_analyst_state(updated_state, updated_history, state_path=ANALYST_STATE_PATH, history_path=ANALYST_HISTORY_PATH)
+                    st.success("Analyst state saved.")
+            marker_rows = fraud_markers_df[fraud_markers_df["entity_id"].astype(str) == entity_id]
+            relationship_rows = relationships_df[(relationships_df["source_entity_id"].astype(str) == entity_id) | (relationships_df["target_entity_id"].astype(str) == entity_id)]
+            evidence_rows = evidence_packets_df[evidence_packets_df["entity_id"].astype(str) == entity_id]
+            timeline_rows = entity_timelines_df[entity_timelines_df["entity_id"].astype(str) == entity_id]
+            lower_left, lower_right = st.columns(2)
+            with lower_left:
+                st.subheader("Fraud Markers")
+                st.dataframe(marker_rows, use_container_width=True, hide_index=True) if not marker_rows.empty else st.info("No markers.")
+                st.subheader("Timeline")
+                st.dataframe(timeline_rows, use_container_width=True, hide_index=True) if not timeline_rows.empty else st.info("No timeline.")
+            with lower_right:
+                st.subheader("Relationships")
+                st.dataframe(relationship_rows, use_container_width=True, hide_index=True) if not relationship_rows.empty else st.info("No relationships.")
+                st.subheader("Evidence")
+                st.dataframe(evidence_rows, use_container_width=True, hide_index=True) if not evidence_rows.empty else st.info("No evidence.")
+
+    elif navigation == "Fraud Markers":
+        st.dataframe(fraud_markers_df.head(int(config.get("page_size", 25))), use_container_width=True, hide_index=True) if not fraud_markers_df.empty else st.info("No fraud markers available.")
+        st.subheader("Summary")
+        st.dataframe(fraud_marker_summary_df, use_container_width=True, hide_index=True) if not fraud_marker_summary_df.empty else st.info("No marker summary available.")
+
+    elif navigation == "Statistical Risk":
+        st.dataframe(statistical_rarity_df.head(int(config.get("page_size", 25))), use_container_width=True, hide_index=True) if not statistical_rarity_df.empty else st.info("No statistical rarity output available.")
+        if not contextual_adjustments_df.empty:
+            st.subheader("Contextual Adjustments")
+            st.dataframe(contextual_adjustments_df, use_container_width=True, hide_index=True)
+        if not statistical_baselines_df.empty:
+            st.subheader("Baselines")
+            st.dataframe(statistical_baselines_df, use_container_width=True, hide_index=True)
+        if statistical_summary:
+            st.subheader("Marker Summary")
+            st.json(statistical_summary)
+        elif not statistical_calibration_df.empty:
+            st.subheader("Calibration Report")
+            st.dataframe(statistical_calibration_df, use_container_width=True, hide_index=True)
+
+    elif navigation == "Network Intelligence":
+        st.dataframe(network_clusters_df.head(int(config.get("page_size", 25))), use_container_width=True, hide_index=True) if not network_clusters_df.empty else st.info("No network data available.")
+        if len(network_clusters_df) >= 1:
+            network_ids = network_clusters_df["network_id"].astype(str).tolist()
+            left_id = st.selectbox("Left Network", network_ids)
+            right_id = st.selectbox("Right Network", network_ids, index=1 if len(network_ids) > 1 else 0)
+            left_row = network_clusters_df[network_clusters_df["network_id"].astype(str) == left_id].iloc[0].to_dict()
+            right_row = network_clusters_df[network_clusters_df["network_id"].astype(str) == right_id].iloc[0].to_dict()
+            st.subheader("Comparison")
+            st.dataframe(compare_records(left_row, right_row, ["network_risk_score", "network_confidence", "network_size", "fraud_marker_count", "relationship_count", "cross_source_matches", "source_name"]), use_container_width=True, hide_index=True)
+        if not network_summary_df.empty:
+            st.subheader("Summary")
+            st.dataframe(network_summary_df, use_container_width=True, hide_index=True)
+        if not network_members_df.empty:
+            st.subheader("Members")
+            st.dataframe(network_members_df.head(int(config.get("page_size", 25))), use_container_width=True, hide_index=True)
+
+    elif navigation == "Cross Source Intelligence":
+        st.dataframe(cross_source_matches_df.head(int(config.get("page_size", 25))), use_container_width=True, hide_index=True) if not cross_source_matches_df.empty else st.info("No cross-source matches available.")
+        if cross_source_summary:
+            st.subheader("Diagnostic Summary")
+            st.json(cross_source_summary)
+        elif not cross_source_diagnostics_df.empty:
+            st.subheader("Diagnostics")
+            st.dataframe(cross_source_diagnostics_df, use_container_width=True, hide_index=True)
+
+    elif navigation == "Entity Explorer":
+        if canonical_entities_df.empty:
+            st.info("No canonical entities available.")
+        else:
+            entity_options = canonical_entities_df["entity_id"].astype(str).tolist() if "entity_id" in canonical_entities_df.columns else canonical_entities_df["canonical_entity_id"].astype(str).tolist()
+            selected_entity_id = st.selectbox("Entity", entity_options)
+            compare_entity_id = st.selectbox("Compare With", entity_options, index=1 if len(entity_options) > 1 else 0)
+            profile_row = canonical_entities_df[(canonical_entities_df.get("entity_id", canonical_entities_df.get("canonical_entity_id")).astype(str) == selected_entity_id)].iloc[0].to_dict()
+            compare_row = canonical_entities_df[(canonical_entities_df.get("entity_id", canonical_entities_df.get("canonical_entity_id")).astype(str) == compare_entity_id)].iloc[0].to_dict()
+            profile_aliases = entity_aliases_df[entity_aliases_df["canonical_entity_id"].astype(str) == selected_entity_id]
+            profile_markers = fraud_markers_df[fraud_markers_df["entity_id"].astype(str) == selected_entity_id]
+            profile_timeline = entity_timelines_df[entity_timelines_df["entity_id"].astype(str) == selected_entity_id]
+            profile_relationships = build_relationship_explorer_data(entities_df, relationships_df, selected_entity_id)
+            profile_evidence = evidence_packets_df[evidence_packets_df["entity_id"].astype(str) == selected_entity_id]
+            left, right = st.columns(2)
+            with left:
+                st.subheader("Canonical Profile")
+                st.json(profile_row)
+                st.subheader("Aliases")
+                st.dataframe(profile_aliases, use_container_width=True, hide_index=True) if not profile_aliases.empty else st.info("No aliases.")
+                st.subheader("Fraud Markers")
+                st.dataframe(profile_markers, use_container_width=True, hide_index=True) if not profile_markers.empty else st.info("No markers.")
+            with right:
+                st.subheader("Timeline")
+                st.dataframe(profile_timeline, use_container_width=True, hide_index=True) if not profile_timeline.empty else st.info("No timeline.")
+                st.subheader("Relationships")
+                st.dataframe(profile_relationships, use_container_width=True, hide_index=True) if not profile_relationships.empty else st.info("No relationships.")
+                st.subheader("Evidence")
+                st.dataframe(profile_evidence, use_container_width=True, hide_index=True) if not profile_evidence.empty else st.info("No evidence.")
+            st.subheader("Side-by-Side Comparison")
+            st.dataframe(compare_records(profile_row, compare_row, ["display_name", "entity_type", "source_name", "source_type", "record_count", "source_count", "resolution_confidence"]), use_container_width=True, hide_index=True)
+
+    elif navigation == "Reports":
+        report_dir = REPO_ROOT / "exports"
+        report_paths = [report_dir / "lead_summary.csv", report_dir / "lead_summary.json", report_dir / "lead_summary.md", report_dir / "lead_summary.html"]
+        report_df = pd.DataFrame([{"path": str(path), "exists": path.exists()} for path in report_paths])
+        st.dataframe(report_df, use_container_width=True, hide_index=True)
+        if not compatibility_report_df.empty:
+            st.subheader("Anomaly Report")
+            st.dataframe(compatibility_report_df, use_container_width=True, hide_index=True)
+
+    elif navigation == "Source Health":
+        st.dataframe(source_health_df, use_container_width=True, hide_index=True)
+        pending_review = source_health_df[source_health_df["pending_review"].astype(bool)] if not source_health_df.empty else pd.DataFrame()
+        st.subheader("Pending Review")
+        st.dataframe(pending_review, use_container_width=True, hide_index=True) if not pending_review.empty else st.info("No sources pending review.")
+
 
 if __name__ == "__main__":
     main()

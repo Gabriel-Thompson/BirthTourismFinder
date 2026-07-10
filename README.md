@@ -146,15 +146,24 @@ Run the dashboard locally:
 streamlit run src/app/dashboard.py
 ```
 
-The dashboard includes:
-- `Cross-Source Intelligence`
+The Analyst Workbench includes:
+- `Overview`
 - `Investigation Queue`
-- `Investigation Workspace`
-- `Network Intelligence`
 - `Fraud Markers`
-- `Entity Risk`
-- `Entity Resolution`
-- `Relationship Explorer`
+- `Statistical Risk`
+- `Network Intelligence`
+- `Cross Source Intelligence`
+- `Entity Explorer`
+- `Reports`
+- `Source Health`
+
+Local workstation features:
+- persisted analyst notes, reviewer, disposition, bookmark, follow-up, and priority override in `data/processed/analyst_lead_state.csv`
+- local investigation history in `data/processed/analyst_history.csv`
+- saved local filters in `data/processed/dashboard_saved_searches.json`
+- local dashboard defaults in `config/dashboard.json`
+- side-by-side entity and network comparison views
+- CSV, JSON, Markdown, and HTML lead-summary exports under `exports/`
 
 If processed files are missing, the dashboard shows recovery guidance instead of crashing.
 

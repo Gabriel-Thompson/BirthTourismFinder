@@ -62,6 +62,11 @@ def _token_count(value: object) -> int:
 def _marker_statistics_lookup(fraud_markers_df: pd.DataFrame) -> dict[str, dict[str, object]]:
     if fraud_markers_df.empty or "entity_id" not in fraud_markers_df.columns:
         return {}
+    def _numeric_series(group: pd.DataFrame, column: str) -> pd.Series:
+        if column not in group.columns:
+            return pd.Series([0] * len(group), index=group.index, dtype=float)
+        return pd.to_numeric(group[column], errors="coerce").fillna(0)
+
     level_order = {
         "EXTREME_OUTLIER": 4,
         "IMMEDIATE_REVIEW": 3,
@@ -73,10 +78,15 @@ def _marker_statistics_lookup(fraud_markers_df: pd.DataFrame) -> dict[str, dict[
     }
     lookup: dict[str, dict[str, object]] = {}
     for entity_id, group in fraud_markers_df.fillna("").groupby("entity_id"):
-        rarity_scores = pd.to_numeric(group.get("rarity_score", 0), errors="coerce").fillna(0)
-        observed_values = pd.to_numeric(group.get("observed_value", 0), errors="coerce").fillna(0)
-        expected_values = pd.to_numeric(group.get("expected_value", 0), errors="coerce").fillna(0)
-        rare_group = group[group.get("rarity_level", pd.Series(dtype=str)).astype(str).isin(["ROUTINE_REVIEW", "ELEVATED_REVIEW", "IMMEDIATE_REVIEW", "EXTREME_OUTLIER"])]
+        rarity_scores = _numeric_series(group, "rarity_score")
+        observed_values = _numeric_series(group, "observed_value")
+        expected_values = _numeric_series(group, "expected_value")
+        rarity_level_series = (
+            group["rarity_level"].astype(str)
+            if "rarity_level" in group.columns
+            else pd.Series([""] * len(group), index=group.index, dtype=str)
+        )
+        rare_group = group[rarity_level_series.isin(["ROUTINE_REVIEW", "ELEVATED_REVIEW", "IMMEDIATE_REVIEW", "EXTREME_OUTLIER"])]
         adjustment_parts = [
             f"{row['marker_name']}:{int(pd.to_numeric(row.get('contextual_adjustment', 0), errors='coerce')):+d}"
             for _, row in group.iterrows()

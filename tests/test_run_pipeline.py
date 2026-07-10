@@ -390,6 +390,7 @@ def test_run_pipeline_runs_health_check_when_requested(tmp_path: Path, capsys: p
     (config_dir / "investigation_engine.json").write_text("{}", encoding="utf-8")
     (config_dir / "cross_source.json").write_text("{}", encoding="utf-8")
     (config_dir / "statistical_risk.json").write_text("{}", encoding="utf-8")
+    (config_dir / "dashboard.json").write_text("{}", encoding="utf-8")
 
     original_cwd = Path.cwd()
     try:
