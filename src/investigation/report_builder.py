@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 
+from src.app.utils.dashboard_filters import parse_bool_series
 from src.connectors.source_metadata import merge_source_values
 from src.investigation.analyst_workbench import (
     ANALYST_HISTORY_COLUMNS,
@@ -51,6 +52,7 @@ def build_investigation_summary(prioritized_leads_df: pd.DataFrame) -> pd.DataFr
         prioritized_leads_df["fraud_markers"].fillna("").astype(str).str.split("|").explode().str.strip()
     )
     source_combos = prioritized_leads_df["source_names"].fillna("").astype(str)
+    contains_real_data = parse_bool_series(prioritized_leads_df["contains_real_data"]) if "contains_real_data" in prioritized_leads_df.columns else pd.Series([False] * len(prioritized_leads_df))
     return pd.DataFrame(
         [
             {
@@ -59,8 +61,8 @@ def build_investigation_summary(prioritized_leads_df: pd.DataFrame) -> pd.DataFr
                 "high_leads": int((prioritized_leads_df["priority"] == "HIGH").sum()),
                 "medium_leads": int((prioritized_leads_df["priority"] == "MEDIUM").sum()),
                 "low_leads": int((prioritized_leads_df["priority"] == "LOW").sum()),
-                "real_data_leads": int(prioritized_leads_df["contains_real_data"].astype(bool).sum()),
-                "synthetic_data_leads": int((~prioritized_leads_df["contains_real_data"].astype(bool)).sum()),
+                "real_data_leads": int(contains_real_data.sum()),
+                "synthetic_data_leads": int((~contains_real_data).sum()),
                 "cross_source_leads": int((pd.to_numeric(prioritized_leads_df["cross_source_match_count"], errors="coerce").fillna(0) > 0).sum()),
                 "entity_leads": int((prioritized_leads_df["lead_type"] != "NETWORK").sum()),
                 "network_leads": int((prioritized_leads_df["lead_type"] == "NETWORK").sum()),
