@@ -70,7 +70,7 @@ DEFAULT_REVIEW_RECOMMENDATIONS_PATH = DEFAULT_PROCESSED_DIR / "review_recommenda
 DEFAULT_SUNBIZ_ENTITIES_PATH = DEFAULT_PROCESSED_DIR / "sunbiz_entities.csv"
 DEFAULT_SUNBIZ_RELATIONSHIPS_PATH = DEFAULT_PROCESSED_DIR / "sunbiz_relationships.csv"
 DEFAULT_SUNBIZ_DAILY_STATUS_JSON_PATH = DEFAULT_PROCESSED_DIR / "sunbiz_daily_status.json"
-DEFAULT_SUNBIZ_DAILY_SOURCE_NAME = "sunbiz_daily_api"
+DEFAULT_SUNBIZ_DAILY_SOURCE_NAME = "sunbiz_daily"
 DEFAULT_COUNTY_CLERK_ENTITIES_PATH = DEFAULT_PROCESSED_DIR / "county_clerk_entities.csv"
 DEFAULT_COUNTY_CLERK_RELATIONSHIPS_PATH = DEFAULT_PROCESSED_DIR / "county_clerk_relationships.csv"
 DEFAULT_COUNTY_PROPERTY_ENTITIES_PATH = DEFAULT_PROCESSED_DIR / "county_property_entities.csv"
@@ -261,10 +261,20 @@ def run_pipeline(
                         "Hillsborough",
                         "--limit",
                         "100",
+                        "--output-dir",
+                        str(processed_path),
                         "--entities-path",
                         str(sunbiz_entities_path),
                         "--relationships-path",
                         str(sunbiz_relationships_path),
+                        "--businesses-path",
+                        str(processed_path / "sunbiz_daily_businesses.csv"),
+                        "--import-summary-path",
+                        str(processed_path / "sunbiz_daily_import_summary.json"),
+                        "--diagnostics-path",
+                        str(processed_path / "sunbiz_daily_import_diagnostics.csv"),
+                        "--matches-path",
+                        str(processed_path / "sunbiz_parcel_matches.csv"),
                         "--status-path",
                         str(processed_path / DEFAULT_SUNBIZ_DAILY_STATUS_PATH.name),
                         "--db-path",

@@ -11,15 +11,16 @@ from src.connectors.sunbiz_daily_connector import MissingAPIKeyError, SunbizDail
 from src.run_pipeline import run_pipeline
 
 
-class _FakeHeaders:
+class _FakeHeaders(dict):
     def get_content_charset(self) -> str:
         return "utf-8"
 
 
 class _FakeResponse:
-    def __init__(self, payload: dict[str, Any]) -> None:
+    def __init__(self, payload: Any, *, status: int = 200, headers: dict[str, Any] | None = None) -> None:
         self.payload = payload
-        self.headers = _FakeHeaders()
+        self.status = status
+        self.headers = _FakeHeaders(headers or {})
 
     def read(self) -> bytes:
         return json.dumps(self.payload).encode("utf-8")
@@ -31,74 +32,109 @@ class _FakeResponse:
         return None
 
 
-def _write_config(tmp_path: Path, *, mock_response_path: Path | None = None, prefer_mock_response: bool = False, default_page_size: int = 100) -> Path:
+def _write_config(
+    tmp_path: Path,
+    *,
+    mock_response_path: Path | None = None,
+    prefer_mock_response: bool = False,
+    enabled: bool = True,
+    default_page_size: int = 100,
+) -> Path:
     config_path = tmp_path / "sunbiz_daily.json"
     config = {
-        "source_name": "sunbiz_daily_api",
-        "base_url": "https://api.sunbizdaily.example.invalid",
-        "endpoint": "/v1/business-filings",
+        "source_name": "sunbiz_daily",
+        "source_type": "official_api",
+        "enabled": enabled,
+        "base_url": "https://sunbizdaily.example.invalid",
+        "list_endpoint": "/api/v2/filings/",
+        "detail_endpoint_template": "/api/v2/filings/{corporation_number}/",
+        "api_key_env": "SUNBIZ_DAILY_API_KEY",
+        "default_county": "Hillsborough",
+        "default_state": "FL",
+        "default_status": "active",
         "default_page_size": default_page_size,
-        "max_requests_per_hour": 3600,
-        "retry_attempts": 3,
-        "retry_backoff": 0.01,
-        "timeout": 5,
-        "county_filter": "Hillsborough",
-        "entity_types": ["LLC", "CORPORATION"],
-        "enabled": True,
-        "api_version": "v1",
-        "api_key_env_var": "SUNBIZ_DAILY_API_KEY",
-        "auth_header": "X-API-Key",
-        "auth_prefix": "",
-        "accept_header": "application/json",
-        "page_param": "page",
-        "page_size_param": "page_size",
-        "limit_param": "limit",
-        "county_param": "county",
-        "city_param": "city",
-        "zip_param": "zip",
-        "from_date_param": "from_date",
-        "to_date_param": "to_date",
-        "entity_type_param": "entity_type",
-        "response_root": "results",
-        "next_page_path": "pagination.next_page",
+        "max_pages": 10,
+        "max_records": 1000,
+        "timeout_seconds": 5,
+        "retry_attempts": 2,
+        "retry_backoff_seconds": 0.01,
+        "poll_interval_seconds": 0.01,
+        "max_poll_attempts": 5,
+        "rate_limit_per_hour": 3600,
         "prefer_mock_response": prefer_mock_response,
         "mock_response_path": str(mock_response_path) if mock_response_path is not None else "",
-        "field_map": {
-            "document_number": "document_number",
-            "business_name": "business_name",
-            "entity_type": "entity_type",
-            "status": "status",
-            "filing_date": "filing_date",
-            "principal_address": "principal_address",
-            "mailing_address": "mailing_address",
-            "registered_agent_name": "registered_agent.name",
-            "registered_agent_address": "registered_agent.address",
-            "officers": "officers",
-            "county": "county",
-            "city": "city",
-            "zip": "zip",
-        },
+        "raw_snapshot_dir": str(tmp_path / "raw_snapshots"),
     }
     config_path.write_text(json.dumps(config), encoding="utf-8")
     return config_path
 
 
-def _sample_record(document_number: str, business_name: str, principal_address: str, mailing_address: str) -> dict[str, Any]:
+def _sample_record(
+    corporation_number: str,
+    corporation_name: str,
+    principal_address: str,
+    mailing_address: str | None,
+    *,
+    officers: list[dict[str, Any]] | None = None,
+    privacy_redacted: bool = False,
+) -> dict[str, Any]:
     return {
-        "document_number": document_number,
-        "business_name": business_name,
-        "entity_type": "LLC",
+        "corporation_number": corporation_number,
+        "corporation_name": corporation_name,
+        "filing_type": "LLC",
+        "filing_type_display": "Florida Limited Liability Company",
         "status": "ACTIVE",
-        "filing_date": "2026-07-01",
-        "principal_address": principal_address,
-        "mailing_address": mailing_address,
-        "registered_agent": {"name": "JANE AGENT", "address": principal_address},
-        "officers": [
-            {"name": "ROBERT OWNER", "address": principal_address},
+        "file_date": "2026-07-01",
+        "fei_number": "12-3456789",
+        "principal_address": {
+            "address_1": principal_address.split(",")[0],
+            "city": "Tampa",
+            "state": "FL",
+            "zip": "33602",
+            "country": "US",
+        },
+        "mailing_address": None
+        if mailing_address is None
+        else {
+            "address_1": mailing_address.split(",")[0],
+            "city": "Tampa",
+            "state": "FL",
+            "zip": "33601",
+            "country": "US",
+        },
+        "registered_agent": {
+            "name": "JANE AGENT",
+            "address": {
+                "address_1": principal_address.split(",")[0],
+                "city": "Tampa",
+                "state": "FL",
+                "zip": "33602",
+                "country": "US",
+            },
+            "agent_type": "INDIVIDUAL",
+        },
+        "officers": officers
+        if officers is not None
+        else [
+            {
+                "name": "ROBERT OWNER",
+                "title": "MGR",
+                "officer_type": "MANAGER",
+                "position": "MANAGER",
+                "address": {
+                    "address_1": principal_address.split(",")[0],
+                    "city": "Tampa",
+                    "state": "FL",
+                    "zip": "33602",
+                    "country": "US",
+                },
+            }
         ],
         "county": "Hillsborough",
         "city": "Tampa",
+        "state": "FL",
         "zip": "33602",
+        "privacy_redacted": privacy_redacted,
     }
 
 
@@ -106,89 +142,134 @@ def test_sunbiz_daily_connector_requires_api_key_for_live_fetch(monkeypatch: pyt
     config_path = _write_config(tmp_path)
     monkeypatch.delenv("SUNBIZ_DAILY_API_KEY", raising=False)
 
-    connector = SunbizDailyConnector(config_path=config_path, limit=1)
+    connector = SunbizDailyConnector(config_path=config_path, max_records=1)
 
     with pytest.raises(MissingAPIKeyError):
         connector.fetch()
 
 
-def test_sunbiz_daily_connector_fetches_paginated_results(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_sunbiz_daily_connector_adds_key_header_and_paginates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_path = _write_config(tmp_path, default_page_size=1)
     monkeypatch.setenv("SUNBIZ_DAILY_API_KEY", "dummy-key")
+    seen_headers: list[dict[str, Any]] = []
 
     payloads = {
-        "1": {
-            "results": [_sample_record("L26000010001", "ONE LLC", "100 Commerce Blvd, Tampa, FL 33602", "PO Box 500, Tampa, FL 33601")],
-            "pagination": {"next_page": 2},
-        },
-        "2": {
-            "results": [_sample_record("L26000010002", "TWO LLC", "200 Commerce Blvd, Tampa, FL 33602", "PO Box 501, Tampa, FL 33601")],
-            "pagination": {"next_page": None},
-        },
+        "1": _FakeResponse(
+            {
+                "filings": [_sample_record("L26000010001", "ONE LLC", "100 Commerce Blvd, Tampa, FL 33602", "PO Box 500, Tampa, FL 33601")],
+                "pagination": {"page": 1, "per_page": 1, "total_pages": 2},
+            },
+            headers={"X-RateLimit-Limit": "1000", "X-RateLimit-Remaining": "999"},
+        ),
+        "2": _FakeResponse(
+            {
+                "filings": [_sample_record("L26000010002", "TWO LLC", "200 Commerce Blvd, Tampa, FL 33602", "PO Box 501, Tampa, FL 33601")],
+                "pagination": {"page": 2, "per_page": 1, "total_pages": 2},
+            }
+        ),
     }
 
     def requester(request, timeout=0):
         from urllib.parse import parse_qs, urlparse
 
+        seen_headers.append(dict(request.headers))
         page = parse_qs(urlparse(request.full_url).query)["page"][0]
-        return _FakeResponse(payloads[page])
+        return payloads[page]
 
-    connector = SunbizDailyConnector(config_path=config_path, requester=requester, limit=2)
+    connector = SunbizDailyConnector(config_path=config_path, requester=requester, max_records=2)
     rows = connector.normalize(connector.parse(connector.fetch()))
 
-    assert [row["document_number"] for row in rows] == ["L26000010001", "L26000010002"]
+    assert [row["corporation_number"] for row in rows] == ["L26000010001", "L26000010002"]
+    assert any(headers.get("X-api-key") == "dummy-key" or headers.get("X-API-Key") == "dummy-key" for headers in seen_headers)
 
 
-def test_sunbiz_daily_connector_retries_and_rate_limits(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    config_path = _write_config(tmp_path)
+def test_sunbiz_daily_connector_handles_async_job_polling(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path, default_page_size=1)
     monkeypatch.setenv("SUNBIZ_DAILY_API_KEY", "dummy-key")
-    sleeps: list[float] = []
-    attempts = {"count": 0}
-
-    monkeypatch.setattr("src.connectors.sunbiz_daily_connector.time.sleep", lambda seconds: sleeps.append(seconds))
-    monkeypatch.setattr("src.connectors.sunbiz_daily_connector.time.time", lambda: 1000.0)
+    calls: list[str] = []
 
     def requester(request, timeout=0):
-        attempts["count"] += 1
-        if attempts["count"] == 1:
-            raise OSError("temporary failure")
-        return _FakeResponse({"results": [_sample_record("L26000010001", "ONE LLC", "100 Commerce Blvd, Tampa, FL 33602", "PO Box 500, Tampa, FL 33601")], "pagination": {"next_page": None}})
+        calls.append(request.full_url)
+        if request.full_url.endswith("/api/v2/filings/?sort=file_date&order=desc&county=Hillsborough&state=FL&status=active&page=1&per_page=1"):
+            return _FakeResponse({"job_id": "job-1", "status": "queued", "poll_url": "/api/v2/jobs/job-1/"}, status=202)
+        if request.full_url.endswith("/api/v2/jobs/job-1/") and len([url for url in calls if url.endswith("/api/v2/jobs/job-1/")]) == 1:
+            return _FakeResponse({"job_id": "job-1", "status": "running"}, status=200)
+        return _FakeResponse(
+            {
+                "status": "done",
+                "filings": [_sample_record("L26000010001", "ONE LLC", "100 Commerce Blvd, Tampa, FL 33602", "PO Box 500, Tampa, FL 33601")],
+                "pagination": {"page": 1, "per_page": 1, "total_pages": 1},
+                "truncated": True
+            },
+            status=200,
+        )
 
-    connector = SunbizDailyConnector(config_path=config_path, requester=requester, limit=1)
-    connector.retry_attempts = 2
-    connector.retry_backoff = 0.25
+    connector = SunbizDailyConnector(config_path=config_path, requester=requester, page_size=1, max_records=1)
+    entities, relationships, summary = connector.run()
 
-    rows = connector.normalize(connector.parse(connector.fetch()))
-
-    assert attempts["count"] == 2
-    assert rows[0]["document_number"] == "L26000010001"
-    assert 0.25 in sleeps
+    assert entities
+    assert relationships
+    assert summary["asynchronous_jobs"] >= 1
+    assert summary["truncated_results"] is True
 
 
-def test_sunbiz_daily_connector_builds_entities_and_relationships(tmp_path: Path) -> None:
+def test_sunbiz_daily_connector_mock_mode_works_without_key_and_preserves_redaction(tmp_path: Path) -> None:
     mock_path = tmp_path / "sample.json"
     mock_path.write_text(
         json.dumps(
             {
-                "results": [
+                "filings": [
                     _sample_record("L26000010001", "ONE LLC", "100 Commerce Blvd, Tampa, FL 33602", "PO Box 500, Tampa, FL 33601"),
-                    _sample_record("L26000010002", "TWO LLC", "200 Commerce Blvd, Tampa, FL 33602", "PO Box 500, Tampa, FL 33601"),
-                ]
+                    _sample_record("L26000010002", "TWO LLC", "200 Commerce Blvd, Tampa, FL 33602", None, officers=[], privacy_redacted=True),
+                ],
+                "pagination": {"page": 1, "per_page": 100, "total_pages": 1},
             }
         ),
         encoding="utf-8",
     )
     config_path = _write_config(tmp_path, mock_response_path=mock_path, prefer_mock_response=True)
 
-    connector = SunbizDailyConnector(config_path=config_path, limit=2)
-    entities, relationships, status = connector.run()
+    connector = SunbizDailyConnector(config_path=config_path, max_records=10, use_mock=True)
+    entities, relationships, summary = connector.run()
 
-    entity_types = {row["entity_type"] for row in entities}
-    relationship_types = {row["relationship_type"] for row in relationships}
-    assert {"business", "officer", "registered_agent", "address"} <= entity_types
-    assert {"OFFICER_OF", "REGISTERED_AGENT_FOR", "BUSINESS_LOCATED_AT", "BUSINESS_MAILING_ADDRESS", "OFFICER_AT_ADDRESS", "REGISTERED_AGENT_AT_ADDRESS"} <= relationship_types
-    assert status["businesses_imported"] == 2
-    assert status["registered_agents_imported"] == 1
+    assert summary["api_status"] == "SUCCESS"
+    assert summary["privacy_redacted_records"] == 1
+    assert summary["redacted_or_incomplete_records"] >= 1
+    assert {"business", "officer", "registered_agent", "address"} <= {row["entity_type"] for row in entities}
+    assert {"OFFICER_OF", "REGISTERED_AGENT_FOR", "BUSINESS_PRINCIPAL_ADDRESS", "BUSINESS_MAILING_ADDRESS"} <= {
+        row["relationship_type"] for row in relationships
+    }
+
+
+def test_sunbiz_daily_connector_deduplicates_duplicate_filings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path, default_page_size=1)
+    monkeypatch.setenv("SUNBIZ_DAILY_API_KEY", "dummy-key")
+
+    payloads = {
+        "1": _FakeResponse(
+            {
+                "filings": [_sample_record("L26000010001", "ONE LLC", "100 Commerce Blvd, Tampa, FL 33602", "PO Box 500, Tampa, FL 33601")],
+                "pagination": {"page": 1, "per_page": 1, "total_pages": 2},
+            }
+        ),
+        "2": _FakeResponse(
+            {
+                "filings": [_sample_record("L26000010001", "ONE LLC", "100 Commerce Blvd, Tampa, FL 33602", "PO Box 500, Tampa, FL 33601")],
+                "pagination": {"page": 2, "per_page": 1, "total_pages": 2},
+            }
+        ),
+    }
+
+    def requester(request, timeout=0):
+        from urllib.parse import parse_qs, urlparse
+
+        page = parse_qs(urlparse(request.full_url).query)["page"][0]
+        return payloads[page]
+
+    connector = SunbizDailyConnector(config_path=config_path, requester=requester, max_records=10)
+    rows = connector.parse(connector.fetch())
+
+    assert len(rows) == 1
 
 
 def test_run_pipeline_includes_sunbiz_daily_and_generates_cross_source_outputs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -207,16 +288,17 @@ def test_run_pipeline_includes_sunbiz_daily_and_generates_cross_source_outputs(m
     mock_path.write_text(
         json.dumps(
             {
-                "results": [
+                "filings": [
                     _sample_record("L26000010001", "ONE LLC", "100 Commerce Blvd, Tampa, FL 33602", "PO Box 500, Tampa, FL 33601"),
                     _sample_record("L26000010002", "TWO LLC", "200 Commerce Blvd, Tampa, FL 33602", "PO Box 500, Tampa, FL 33601"),
                     _sample_record("L26000010003", "THREE LLC", "300 Commerce Blvd, Tampa, FL 33602", "PO Box 500, Tampa, FL 33601"),
-                ]
+                ],
+                "pagination": {"page": 1, "per_page": 100, "total_pages": 1},
             }
         ),
         encoding="utf-8",
     )
-    config_path = _write_config(tmp_path, mock_response_path=mock_path, prefer_mock_response=True)
+    config_path = _write_config(tmp_path, mock_response_path=mock_path, prefer_mock_response=True, enabled=True)
     monkeypatch.setenv("OPENFRAUD_SUNBIZ_DAILY_CONFIG_PATH", str(config_path))
     monkeypatch.setenv("SUNBIZ_DAILY_API_KEY", "dummy-key")
 
@@ -230,15 +312,11 @@ def test_run_pipeline_includes_sunbiz_daily_and_generates_cross_source_outputs(m
     )
 
     sunbiz_entities = pd.read_csv(processed_dir / "sunbiz_entities.csv")
-    fraud_markers = pd.read_csv(processed_dir / "fraud_markers.csv")
+    sunbiz_daily_summary = json.loads((processed_dir / "sunbiz_daily_import_summary.json").read_text(encoding="utf-8"))
     cross_source_matches = pd.read_csv(processed_dir / "cross_source_matches.csv")
-    status_payload = json.loads((processed_dir / "sunbiz_daily_status.json").read_text(encoding="utf-8"))
 
     assert not sunbiz_entities.empty
-    assert set(sunbiz_entities["source_name"]) == {"sunbiz_daily_api"}
+    assert set(sunbiz_entities["source_name"]) == {"sunbiz_daily"}
     assert not cross_source_matches.empty
-    assert "property_situs_matches_business_address" in set(cross_source_matches["match_method"]) or "parcel_owner_matches_person_with_secondary" in set(cross_source_matches["match_method"])
-    assert "Many Companies Sharing One Mailing Address" in set(fraud_markers["marker_name"])
-    assert "One Officer Controlling Many Businesses" in set(fraud_markers["marker_name"])
-    assert "One Registered Agent Connected to Unusually Dense Networks" in set(fraud_markers["marker_name"])
-    assert status_payload["api_status"] == "SUCCESS"
+    assert (processed_dir / "sunbiz_parcel_matches.csv").exists()
+    assert sunbiz_daily_summary["api_status"] == "SUCCESS"

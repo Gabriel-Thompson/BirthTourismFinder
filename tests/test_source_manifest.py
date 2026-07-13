@@ -24,6 +24,7 @@ def test_load_sources_contains_expected_entries() -> None:
         "synthetic",
         "manual_csv",
         "sunbiz_local_file",
+        "sunbiz_daily",
         "sunbiz_daily_api",
         "county_property_local_file",
         "county_clerk_local_file",
@@ -50,6 +51,7 @@ def test_is_live_access_allowed_is_false_for_local_sources() -> None:
     assert is_live_access_allowed("synthetic") is False
     assert is_live_access_allowed("manual_csv") is False
     assert is_live_access_allowed("sunbiz_local_file") is False
+    assert is_live_access_allowed("sunbiz_daily") is True
     assert is_live_access_allowed("sunbiz_daily_api") is True
     assert is_live_access_allowed("county_property_local_file") is False
     assert is_live_access_allowed("county_clerk_local_file") is False

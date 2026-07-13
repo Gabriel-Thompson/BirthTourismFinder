@@ -46,6 +46,25 @@
     ],
     "notes": "Use only pre-downloaded local files. Do not access Sunbiz live services from this project."
   },
+  "sunbiz_daily": {
+    "source_name": "sunbiz_daily",
+    "source_type": "official_api",
+    "access_method": "official_authenticated_api",
+    "live_access_allowed": true,
+    "terms_review_required": true,
+    "review_document": "docs/source_reviews/sunbiz.md",
+    "imported_at": "",
+    "data_path": "config/sunbiz_daily.json",
+    "processed_outputs": [
+      "data/processed/sunbiz_daily_businesses.csv",
+      "data/processed/sunbiz_daily_entities.csv",
+      "data/processed/sunbiz_daily_relationships.csv",
+      "data/processed/sunbiz_daily_import_summary.json",
+      "data/processed/sunbiz_daily_import_diagnostics.csv",
+      "data/processed/sunbiz_parcel_matches.csv"
+    ],
+    "notes": "Primary corporate-record connector for OpenFraud using the authenticated Sunbiz Daily API. Use bounded requests, respect the account rate limit, and keep all processing local."
+  },
   "sunbiz_daily_api": {
     "source_name": "sunbiz_daily_api",
     "source_type": "official_api",
@@ -60,7 +79,7 @@
       "data/processed/sunbiz_relationships.csv",
       "data/processed/sunbiz_daily_status.json"
     ],
-    "notes": "Primary corporate-record connector for OpenFraud using the authenticated Sunbiz Daily API. Use bounded requests, respect the account rate limit, and keep all processing local."
+    "notes": "Compatibility alias for older Sunbiz Daily pipeline references. New work should use the canonical source name `sunbiz_daily`."
   },
   "county_property_local_file": {
     "source_name": "county_property_local_file",

@@ -11,7 +11,7 @@ OpenFraud is a local-first public-record fraud-marker discovery MVP. It uses Duc
    ```
 3. For Sunbiz Daily imports, copy `.env.example` to `.env` and set:
    ```bash
-   SUNBIZ_DAILY_API_KEY=your-local-api-key
+   SUNBIZ_DAILY_API_KEY=YOUR_SUNBIZ_DAILY_API_KEY_HERE
    ```
 4. Run the local pipeline:
    ```bash
@@ -89,9 +89,10 @@ python src/connectors/county_clerk/local_file_connector.py
 
 Sunbiz Daily:
 ```bash
-python src/connectors/sunbiz_daily_connector.py
-python src/connectors/sunbiz_daily_connector.py --county Hillsborough --limit 100
-python src/connectors/sunbiz_daily_connector.py --county Hillsborough --city Tampa --zip 33602 --from-date 2026-07-01 --to-date 2026-07-10 --limit 100
+python -m src.connectors.sunbiz_daily_connector --mock --county Hillsborough --max-records 100
+python -m src.connectors.sunbiz_daily_connector --county Hillsborough --status active --max-records 100
+python -m src.connectors.sunbiz_daily_connector --zip 336 --status active --max-records 500
+python -m src.connectors.sunbiz_daily_connector --start-date 2026-01-01 --end-date 2026-07-13 --max-records 500
 python src/run_pipeline.py --include-sunbiz --include-connectors --health-check
 ```
 
@@ -180,8 +181,14 @@ The `Source Health` page includes a `Sunbiz Daily` section that shows:
 - addresses
 - cross-source matches
 - API status
-- last import
+- key present
+- last successful import
+- import filters
 - county coverage
+- redacted or incomplete records
+- asynchronous jobs
+- truncated results
+- rate-limit remaining
 
 Local workstation features:
 - persisted analyst notes, reviewer, disposition, bookmark, follow-up, and priority override in `data/processed/analyst_lead_state.csv`
@@ -709,14 +716,25 @@ Setup:
 Behavior:
 - the connector is local-first and writes only local CSV/JSON artifacts
 - it preserves source provenance on every entity and relationship
+- it preserves bounded raw response snapshots in `data/raw/sunbiz_daily/`
 - it does not fetch document images
 - it does not scrape any websites
-- it respects bounded pagination, retries, timeouts, and rate limiting
+- it respects bounded pagination, retries, timeouts, async job polling, and rate limiting
 
 Limitations:
 - the connector only ingests filing metadata and linked parties/addresses
+- county filtering is enrichment-based and incomplete, so empty county results do not prove the absence of businesses
+- privacy-redacted or incomplete API fields are preserved as limitations, not treated as fraud indicators
 - all results remain investigative leads only, not proof of fraud
 - API access depends on the configured key and official account access
+
+Outputs:
+- `data/processed/sunbiz_daily_businesses.csv`
+- `data/processed/sunbiz_daily_entities.csv`
+- `data/processed/sunbiz_daily_relationships.csv`
+- `data/processed/sunbiz_daily_import_summary.json`
+- `data/processed/sunbiz_daily_import_diagnostics.csv`
+- `data/processed/sunbiz_parcel_matches.csv`
 
 ## Phase 3 Note
 

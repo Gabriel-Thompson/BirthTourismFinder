@@ -609,6 +609,9 @@ def load_cross_source_matches(path: Path | str = CROSS_SOURCE_MATCHES_PATH) -> p
         "contains_real_data",
         "contains_synthetic_data",
         "why_sources_independent",
+        "sunbiz_corporation_number",
+        "sunbiz_business_name",
+        "parcel_id",
     ]
 
     def transform(df: pd.DataFrame) -> pd.DataFrame:

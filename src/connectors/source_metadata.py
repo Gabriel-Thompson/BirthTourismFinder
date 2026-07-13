@@ -24,8 +24,8 @@ SYNTHETIC_SOURCE_LABELS = {"synthetic", "business_entities", "properties", "know
 LOCAL_SOURCE_ALIASES = {
     "sunbiz": "sunbiz_local_file",
     "sunbiz_local_file": "sunbiz_local_file",
-    "sunbiz_daily": "sunbiz_daily_api",
-    "sunbiz_daily_api": "sunbiz_daily_api",
+    "sunbiz_daily": "sunbiz_daily",
+    "sunbiz_daily_api": "sunbiz_daily",
     "county_property": "county_property_local_file",
     "county_property_local_file": "county_property_local_file",
     "county_clerk": "county_clerk_local_file",
@@ -81,7 +81,7 @@ def infer_source_metadata(source_hint: str | None) -> Dict[str, str]:
         return {"source_name": "synthetic", "source_type": "synthetic"}
 
     canonical_local = LOCAL_SOURCE_ALIASES.get(lowered)
-    if canonical_local == "sunbiz_daily_api":
+    if canonical_local == "sunbiz_daily":
         return {"source_name": canonical_local, "source_type": "api"}
     if canonical_local == "manual_csv":
         return {"source_name": canonical_local, "source_type": "manual"}

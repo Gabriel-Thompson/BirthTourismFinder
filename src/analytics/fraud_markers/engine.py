@@ -170,7 +170,7 @@ class SharedAddressBusinessesMarker(BaseMarker):
         records: List[FraudMarkerRecord] = []
         address_groups: dict[str, list[dict[str, object]]] = defaultdict(list)
         for row in context.relationships_df.to_dict("records"):
-            if str(row.get("relationship_type", "")) not in {"LOCATED_AT", "BUSINESS_LOCATED_AT"}:
+            if str(row.get("relationship_type", "")) not in {"LOCATED_AT", "BUSINESS_LOCATED_AT", "BUSINESS_PRINCIPAL_ADDRESS"}:
                 continue
             source = entity_row(context, str(row.get("source_entity_id", "")))
             target = entity_row(context, str(row.get("target_entity_id", "")))
@@ -407,7 +407,7 @@ class SimilarBusinessNamesMarker(BaseMarker):
         records: List[FraudMarkerRecord] = []
         address_to_businesses: dict[str, list[str]] = defaultdict(list)
         for row in context.relationships_df.to_dict("records"):
-            if str(row.get("relationship_type", "")) not in {"LOCATED_AT", "BUSINESS_LOCATED_AT"}:
+            if str(row.get("relationship_type", "")) not in {"LOCATED_AT", "BUSINESS_LOCATED_AT", "BUSINESS_PRINCIPAL_ADDRESS"}:
                 continue
             source = entity_row(context, str(row.get("source_entity_id", "")))
             target = entity_row(context, str(row.get("target_entity_id", "")))
@@ -586,7 +586,11 @@ class RegisteredAgentDenseNetworkMarker(BaseMarker):
             if str(entity.get("entity_type", "")) != "registered_agent":
                 continue
             business_links = [row for row in rels if str(row.get("relationship_type", "")) == "REGISTERED_AGENT_FOR"]
-            address_links = [row for row in rels if str(row.get("relationship_type", "")) == "REGISTERED_AGENT_AT_ADDRESS"]
+            address_links = [
+                row
+                for row in rels
+                if str(row.get("relationship_type", "")) in {"REGISTERED_AGENT_AT_ADDRESS", "REGISTERED_AGENT_ASSOCIATED_WITH_ADDRESS"}
+            ]
             support = len({str(row.get("target_entity_id", "")) for row in business_links if str(row.get("target_entity_id", "")).strip()})
             if support < self.minimum_support:
                 continue
