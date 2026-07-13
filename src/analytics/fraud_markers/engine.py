@@ -591,8 +591,15 @@ class RegisteredAgentDenseNetworkMarker(BaseMarker):
                 for row in rels
                 if str(row.get("relationship_type", "")) in {"REGISTERED_AGENT_AT_ADDRESS", "REGISTERED_AGENT_ASSOCIATED_WITH_ADDRESS"}
             ]
+            corroborating_links = [
+                row
+                for row in rels
+                if str(row.get("relationship_type", "")) not in {"REGISTERED_AGENT_FOR", "REGISTERED_AGENT_AT_ADDRESS", "REGISTERED_AGENT_ASSOCIATED_WITH_ADDRESS"}
+            ]
             support = len({str(row.get("target_entity_id", "")) for row in business_links if str(row.get("target_entity_id", "")).strip()})
             if support < self.minimum_support:
+                continue
+            if not corroborating_links and len(address_links) <= 1:
                 continue
             rec = marker_record(
                 self,
@@ -604,8 +611,8 @@ class RegisteredAgentDenseNetworkMarker(BaseMarker):
                 source_types=[str(entity.get("source_type", "")), *[str(entity_row(context, str(row.get("target_entity_id", ""))).get("source_type", "")) for row in business_links]],
                 supporting_entities=[entity_id, *[str(row.get("target_entity_id", "")) for row in business_links], *[str(row.get("target_entity_id", "")) for row in address_links]],
                 supporting_relationships=[str(row.get("relationship_id", "")) for row in [*business_links, *address_links]],
-                recommended_review="Review whether the registered agent is serving a normal commercial volume or acting as a central node across a dense filing network.",
-                explanation=f"Registered agent {entity.get('display_name', entity_id)} is connected to {support} businesses and {len(address_links)} tracked addresses.",
+                recommended_review="Review whether the registered agent has corroborating overlap beyond ordinary filing volume, such as repeated non-agent addresses or officer overlap.",
+                explanation=f"Registered agent {entity.get('display_name', entity_id)} is connected to {support} businesses, {len(address_links)} tracked addresses, and {len(corroborating_links)} corroborating non-agent links.",
             )
             if rec is not None:
                 records.append(rec)

@@ -241,6 +241,145 @@ def test_sunbiz_daily_connector_mock_mode_works_without_key_and_preserves_redact
     }
 
 
+def test_sunbiz_daily_connector_same_name_people_remain_distinct_and_stable(tmp_path: Path) -> None:
+    mock_path = tmp_path / "sample.json"
+    mock_path.write_text(
+        json.dumps(
+            {
+                "filings": [
+                    _sample_record(
+                        "L26000010001",
+                        "ONE LLC",
+                        "100 Commerce Blvd, Tampa, FL 33602",
+                        "PO Box 500, Tampa, FL 33601",
+                        officers=[
+                            {
+                                "name": "JOHN SMITH",
+                                "title": "MGR",
+                                "officer_type": "MANAGER",
+                                "position": "MANAGER",
+                                "address": {"address_1": "100 Commerce Blvd Apt 10", "city": "Tampa", "state": "FL", "zip": "33602"},
+                            }
+                        ],
+                    ),
+                    _sample_record(
+                        "L26000010002",
+                        "TWO LLC",
+                        "200 Commerce Blvd, Tampa, FL 33602",
+                        "PO Box 501, Tampa, FL 33601",
+                        officers=[
+                            {
+                                "name": "JOHN SMITH",
+                                "title": "MGR",
+                                "officer_type": "MANAGER",
+                                "position": "MANAGER",
+                                "address": {"address_1": "200 Commerce Blvd Apt 20", "city": "Tampa", "state": "FL", "zip": "33602"},
+                            }
+                        ],
+                    ),
+                ],
+                "pagination": {"page": 1, "per_page": 100, "total_pages": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = _write_config(tmp_path, mock_response_path=mock_path, prefer_mock_response=True)
+    connector = SunbizDailyConnector(config_path=config_path, max_records=10, mode="mock")
+    normalized = connector.normalize(connector.parse(connector.fetch()))
+    entities_first = connector.to_entities(normalized)
+    entities_second = connector.to_entities(normalized)
+
+    officer_ids_first = sorted(row["entity_id"] for row in entities_first if row["entity_type"] == "officer")
+    officer_ids_second = sorted(row["entity_id"] for row in entities_second if row["entity_type"] == "officer")
+    assert len(officer_ids_first) == 2
+    assert officer_ids_first == officer_ids_second
+    assert officer_ids_first[0] != officer_ids_first[1]
+    assert all(entity_id.startswith("person:sunbiz_daily:L2600001000") for entity_id in officer_ids_first)
+
+
+def test_sunbiz_daily_connector_officer_ids_stable_when_source_order_changes(tmp_path: Path) -> None:
+    officer_a = {
+        "name": "JOHN SMITH",
+        "title": "MGR",
+        "officer_type": "MANAGER",
+        "position": "MANAGER",
+        "address": {"address_1": "100 Commerce Blvd Apt 10", "city": "Tampa", "state": "FL", "zip": "33602"},
+    }
+    officer_b = {
+        "name": "JANE SMITH",
+        "title": "MGR",
+        "officer_type": "MANAGER",
+        "position": "MANAGER",
+        "address": {"address_1": "100 Commerce Blvd Apt 11", "city": "Tampa", "state": "FL", "zip": "33602"},
+    }
+    mock_path = tmp_path / "sample.json"
+    mock_path.write_text(
+        json.dumps(
+            {
+                "filings": [
+                    _sample_record("L26000010001", "ONE LLC", "100 Commerce Blvd, Tampa, FL 33602", "PO Box 500, Tampa, FL 33601", officers=[officer_a, officer_b]),
+                ],
+                "pagination": {"page": 1, "per_page": 100, "total_pages": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = _write_config(tmp_path, mock_response_path=mock_path, prefer_mock_response=True)
+    connector = SunbizDailyConnector(config_path=config_path, max_records=10, mode="mock")
+    ids_first = sorted(row["entity_id"] for row in connector.to_entities(connector.normalize(connector.parse(connector.fetch()))) if row["entity_type"] == "officer")
+
+    mock_path.write_text(
+        json.dumps(
+            {
+                "filings": [
+                    _sample_record("L26000010001", "ONE LLC", "100 Commerce Blvd, Tampa, FL 33602", "PO Box 500, Tampa, FL 33601", officers=[officer_b, officer_a]),
+                ],
+                "pagination": {"page": 1, "per_page": 100, "total_pages": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    connector_reordered = SunbizDailyConnector(config_path=config_path, max_records=10, mode="mock")
+    ids_second = sorted(row["entity_id"] for row in connector_reordered.to_entities(connector_reordered.normalize(connector_reordered.parse(connector_reordered.fetch()))) if row["entity_type"] == "officer")
+    assert ids_first == ids_second
+
+
+def test_sunbiz_daily_connector_registered_agent_and_officer_remain_distinct(tmp_path: Path) -> None:
+    mock_path = tmp_path / "sample.json"
+    mock_path.write_text(
+        json.dumps(
+            {
+                "filings": [
+                    _sample_record(
+                        "L26000010001",
+                        "ONE LLC",
+                        "100 Commerce Blvd, Tampa, FL 33602",
+                        "PO Box 500, Tampa, FL 33601",
+                        officers=[
+                            {
+                                "name": "JANE AGENT",
+                                "title": "MGR",
+                                "officer_type": "MANAGER",
+                                "position": "MANAGER",
+                                "address": {"address_1": "100 Commerce Blvd", "city": "Tampa", "state": "FL", "zip": "33602"},
+                            }
+                        ],
+                    )
+                ],
+                "pagination": {"page": 1, "per_page": 100, "total_pages": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = _write_config(tmp_path, mock_response_path=mock_path, prefer_mock_response=True)
+    connector = SunbizDailyConnector(config_path=config_path, max_records=10, mode="mock")
+    entities = connector.to_entities(connector.normalize(connector.parse(connector.fetch())))
+    officer_ids = [row["entity_id"] for row in entities if row["entity_type"] == "officer"]
+    agent_ids = [row["entity_id"] for row in entities if row["entity_type"] == "registered_agent"]
+    assert officer_ids and agent_ids
+    assert set(officer_ids).isdisjoint(agent_ids)
+
+
 def test_sunbiz_daily_connector_deduplicates_duplicate_filings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_path = _write_config(tmp_path, default_page_size=1)
     monkeypatch.setenv("SUNBIZ_DAILY_API_KEY", "dummy-key")
@@ -309,14 +448,19 @@ def test_run_pipeline_includes_sunbiz_daily_and_generates_cross_source_outputs(m
         processed_dir=processed_dir,
         include_connectors=True,
         include_sunbiz=True,
+        sunbiz_mock=True,
     )
 
     sunbiz_entities = pd.read_csv(processed_dir / "sunbiz_entities.csv")
     sunbiz_daily_summary = json.loads((processed_dir / "sunbiz_daily_import_summary.json").read_text(encoding="utf-8"))
     cross_source_matches = pd.read_csv(processed_dir / "cross_source_matches.csv")
+    match_quality_report = json.loads((processed_dir / "sunbiz_match_quality_report.json").read_text(encoding="utf-8"))
+    match_quality_samples = pd.read_csv(processed_dir / "sunbiz_match_quality_samples.csv")
 
     assert not sunbiz_entities.empty
     assert set(sunbiz_entities["source_name"]) == {"sunbiz_daily"}
     assert not cross_source_matches.empty
     assert (processed_dir / "sunbiz_parcel_matches.csv").exists()
     assert sunbiz_daily_summary["api_status"] == "SUCCESS"
+    assert match_quality_report["total_candidate_comparisons"] >= 1
+    assert set(match_quality_samples["decision"]).issubset({"ACCEPTED_EXACT", "REVIEW_STRONG", "REVIEW_WEAK", "REJECTED", "INSUFFICIENT_DATA"})

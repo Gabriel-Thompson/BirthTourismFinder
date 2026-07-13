@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import os
+import json
 import pandas as pd
 import pytest
 
@@ -153,6 +154,87 @@ def test_run_pipeline_includes_sunbiz_connector(tmp_path: Path) -> None:
     assert "sunbiz:SB1" in set(relationships["source_entity_id"])
     assert "source_name" in relationships.columns
     assert "source_type" in relationships.columns
+
+
+def test_run_pipeline_passes_sunbiz_mock_options(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    source_dir = tmp_path / "data" / "raw" / "synthetic"
+    processed_dir = tmp_path / "data" / "processed"
+    output_db = tmp_path / "local_osint.duckdb"
+    property_input_dir = tmp_path / "data" / "raw" / "county_property"
+    property_input_dir.mkdir(parents=True)
+    (property_input_dir / "property_records.csv").write_text(
+        "parcel_id,owner_name,situs_address,mailing_address,property_use,land_use,assessed_value,sale_date,sale_price\n"
+        "HC-1,ROBERT OWNER,\"100 Commerce Blvd, Tampa, FL 33602\",\"PO Box 500, Tampa, FL 33601\",Residential,Single Family,350000,2025-01-01,320000\n",
+        encoding="utf-8",
+    )
+    mock_path = tmp_path / "sunbiz_daily_mock.json"
+    mock_path.write_text(
+        json.dumps(
+            {
+                "filings": [
+                    {
+                        "corporation_number": "L26000010001",
+                        "corporation_name": "ONE LLC",
+                        "filing_type": "LLC",
+                        "filing_type_display": "Florida Limited Liability Company",
+                        "status": "ACTIVE",
+                        "file_date": "2026-07-01",
+                        "principal_address": {"address_1": "100 Commerce Blvd", "city": "Tampa", "state": "FL", "zip": "33602"},
+                        "mailing_address": {"address_1": "PO Box 500", "city": "Tampa", "state": "FL", "zip": "33601"},
+                        "registered_agent": {"name": "JANE AGENT", "address": {"address_1": "100 Commerce Blvd", "city": "Tampa", "state": "FL", "zip": "33602"}},
+                        "officers": [{"name": "ROBERT OWNER", "title": "MGR", "officer_type": "MANAGER", "position": "MANAGER", "address": {"address_1": "100 Commerce Blvd", "city": "Tampa", "state": "FL", "zip": "33602"}}],
+                        "county": "Hillsborough",
+                        "city": "Tampa",
+                        "state": "FL",
+                        "zip": "33602",
+                    }
+                ],
+                "pagination": {"page": 1, "per_page": 100, "total_pages": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "sunbiz_daily.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "source_name": "sunbiz_daily",
+                "source_type": "official_api",
+                "enabled": False,
+                "base_url": "https://sunbizdaily.example.invalid",
+                "list_endpoint": "/api/v2/filings/",
+                "detail_endpoint_template": "/api/v2/filings/{corporation_number}/",
+                "api_key_env": "SUNBIZ_DAILY_API_KEY",
+                "default_county": "Hillsborough",
+                "default_state": "FL",
+                "default_status": "active",
+                "default_page_size": 100,
+                "max_pages": 10,
+                "max_records": 1000,
+                "timeout_seconds": 5,
+                "retry_attempts": 2,
+                "retry_backoff_seconds": 0.01,
+                "mock_response_path": str(mock_path),
+                "prefer_mock_response": True,
+                "raw_snapshot_dir": str(tmp_path / "raw_snapshots"),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENFRAUD_SUNBIZ_DAILY_CONFIG_PATH", str(config_path))
+    run_pipeline(
+        records=10,
+        source_dir=source_dir,
+        output_db=output_db,
+        processed_dir=processed_dir,
+        include_connectors=True,
+        include_sunbiz=True,
+        sunbiz_mock=True,
+        sunbiz_county="Hillsborough",
+        sunbiz_max_records=25,
+    )
+    assert (processed_dir / "sunbiz_match_quality_report.json").exists()
+    assert (processed_dir / "sunbiz_match_quality_samples.csv").exists()
 
 
 def test_run_pipeline_skips_when_default_sunbiz_file_missing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

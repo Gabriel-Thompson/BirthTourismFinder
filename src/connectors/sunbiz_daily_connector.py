@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -37,10 +39,14 @@ DEFAULT_RELATIONSHIPS_PATH = DEFAULT_OUTPUT_DIR / "sunbiz_daily_relationships.cs
 DEFAULT_IMPORT_SUMMARY_PATH = DEFAULT_OUTPUT_DIR / "sunbiz_daily_import_summary.json"
 DEFAULT_DIAGNOSTICS_PATH = DEFAULT_OUTPUT_DIR / "sunbiz_daily_import_diagnostics.csv"
 DEFAULT_MATCHES_PATH = DEFAULT_OUTPUT_DIR / "sunbiz_parcel_matches.csv"
+DEFAULT_MATCH_QUALITY_REPORT_PATH = DEFAULT_OUTPUT_DIR / "sunbiz_match_quality_report.json"
+DEFAULT_MATCH_QUALITY_SAMPLES_PATH = DEFAULT_OUTPUT_DIR / "sunbiz_match_quality_samples.csv"
+DEFAULT_IMPORT_MANIFEST_PATH = DEFAULT_OUTPUT_DIR / "sunbiz_daily_import_manifest.json"
 DEFAULT_STATUS_PATH = DEFAULT_OUTPUT_DIR / "sunbiz_daily_status.json"
 LEGACY_ENTITIES_PATH = DEFAULT_OUTPUT_DIR / "sunbiz_entities.csv"
 LEGACY_RELATIONSHIPS_PATH = DEFAULT_OUTPUT_DIR / "sunbiz_relationships.csv"
 DEFAULT_DB_PATH = Path("local_osint.duckdb")
+CONNECTOR_VERSION = "5.2"
 
 BUSINESS_FIELDS = [
     "corporation_number",
@@ -139,6 +145,47 @@ DIAGNOSTIC_FIELDS = [
     "truncated",
 ]
 
+MATCH_FIELDS = [
+    "match_id",
+    "decision",
+    "match_type",
+    "match_confidence",
+    "sunbiz_entity_id",
+    "parcel_entity_id",
+    "parcel_id",
+    "corporation_number",
+    "business_name",
+    "person_name",
+    "person_role",
+    "original_sunbiz_address",
+    "normalized_sunbiz_address",
+    "original_parcel_address",
+    "normalized_parcel_address",
+    "address_match_scope",
+    "person_name_match",
+    "address_match",
+    "business_name_match",
+    "corroborating_field_count",
+    "conflicting_field_count",
+    "name_frequency",
+    "common_name_downgraded",
+    "privacy_redacted",
+    "insufficient_data_reason",
+    "registered_agent_business_count",
+    "registered_agent_address_count",
+    "registered_agent_is_possible_service_provider",
+    "concentration_by_address",
+    "concentration_by_officer",
+    "corroborating_non_agent_relationships",
+    "sunbiz_source_record_id",
+    "parcel_source_record_id",
+    "sunbiz_source_name",
+    "parcel_source_name",
+    "explanation",
+    "recommended_review",
+    "imported_at",
+]
+
 
 class MissingAPIKeyError(RuntimeError):
     pass
@@ -227,6 +274,15 @@ def _safe_int(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _slugify(value: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
+    return cleaned or "unknown"
+
+
+def _compact_hash(value: str, *, length: int = 12) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:length]
 
 
 def _make_request_url(base_url: str, path_or_url: str) -> str:
@@ -391,6 +447,123 @@ def _parse_officers(value: Any) -> list[dict[str, str]]:
             }
         )
     return rows
+
+
+def _stable_officer_key(officer: dict[str, str]) -> tuple[str, str, str, str, str, str]:
+    return (
+        _stringify(officer.get("normalized_name")),
+        _stringify(officer.get("title")),
+        _stringify(officer.get("officer_type")),
+        _stringify(officer.get("position")),
+        normalize_address(_stringify(officer.get("address"))),
+        _stringify(officer.get("original_name")),
+    )
+
+
+def _stable_officers(officers: list[dict[str, str]]) -> list[dict[str, Any]]:
+    ordered = sorted((dict(officer) for officer in officers), key=_stable_officer_key)
+    seen_counts: dict[str, int] = {}
+    stable_rows: list[dict[str, Any]] = []
+    for officer in ordered:
+        key_material = "|".join(_stable_officer_key(officer))
+        fingerprint = _compact_hash(key_material, length=16)
+        seen_counts[fingerprint] = seen_counts.get(fingerprint, 0) + 1
+        officer["stable_fingerprint"] = fingerprint
+        officer["stable_ordinal"] = seen_counts[fingerprint]
+        stable_rows.append(officer)
+    return stable_rows
+
+
+def _sunbiz_business_entity_id(corporation_number: str) -> str:
+    return f"business:sunbiz_daily:{corporation_number}"
+
+
+def _sunbiz_registered_agent_entity_id(corporation_number: str) -> str:
+    return f"registered_agent:sunbiz_daily:{corporation_number}"
+
+
+def _sunbiz_officer_source_record_id(corporation_number: str, officer: dict[str, Any]) -> str:
+    return (
+        f"{corporation_number}:officer:{officer.get('stable_fingerprint', 'unknown')}:"
+        f"{officer.get('stable_ordinal', 1)}"
+    )
+
+
+def _sunbiz_officer_entity_id(corporation_number: str, officer: dict[str, Any]) -> str:
+    return f"person:sunbiz_daily:{_sunbiz_officer_source_record_id(corporation_number, officer)}"
+
+
+def _zip5(value: str) -> str:
+    digits = "".join(char for char in str(value or "") if char.isdigit())
+    return digits[:5]
+
+
+def _extract_unit_marker(parsed: dict[str, Any]) -> str:
+    return _slugify(parsed.get("unit") or "")
+
+
+def _is_po_box_text(value: str) -> bool:
+    normalized = normalize_address(value)
+    return "PO BOX" in normalized or "P O BOX" in normalized
+
+
+def _is_generalized_address(value: str) -> bool:
+    normalized = normalize_address(value)
+    markers = {"PRIVATE", "REDACTED", "UNKNOWN", "WITHHELD", "GENERAL DELIVERY"}
+    return any(marker in normalized for marker in markers)
+
+
+def _is_incomplete_address(parsed: dict[str, Any]) -> bool:
+    return not bool(parsed.get("street_number")) or not bool(parsed.get("street_name"))
+
+
+def _classify_address_match_scope(
+    *,
+    sunbiz_original: str,
+    sunbiz_normalized: str,
+    parcel_original: str,
+    parcel_normalized: str,
+) -> str:
+    if not sunbiz_normalized or not parcel_normalized:
+        return "INCOMPLETE"
+    if _is_po_box_text(sunbiz_original) or _is_po_box_text(parcel_original):
+        return "PO_BOX"
+    if _is_generalized_address(sunbiz_original) or _is_generalized_address(parcel_original):
+        return "GENERALIZED"
+    sunbiz_parts = normalize_address_value(sunbiz_original or sunbiz_normalized)
+    parcel_parts = normalize_address_value(parcel_original or parcel_normalized)
+    if _is_incomplete_address(sunbiz_parts) or _is_incomplete_address(parcel_parts):
+        return "INCOMPLETE"
+    if sunbiz_normalized == parcel_normalized:
+        sunbiz_unit = _extract_unit_marker(sunbiz_parts)
+        parcel_unit = _extract_unit_marker(parcel_parts)
+        if sunbiz_unit and parcel_unit:
+            return "EXACT_UNIT"
+        return "EXACT_BUILDING"
+    same_building = (
+        bool(sunbiz_parts.get("building_key"))
+        and sunbiz_parts.get("building_key") == parcel_parts.get("building_key")
+    )
+    if same_building:
+        sunbiz_unit = _extract_unit_marker(sunbiz_parts)
+        parcel_unit = _extract_unit_marker(parcel_parts)
+        if sunbiz_unit and parcel_unit and sunbiz_unit != parcel_unit:
+            return "GENERALIZED"
+        return "EXACT_BUILDING"
+    return "MAILING_ONLY"
+
+
+def _build_run_id(source_name: str, filters: dict[str, Any], imported_at: str) -> str:
+    material = json.dumps(
+        {
+            "source_name": source_name,
+            "filters": {key: value for key, value in filters.items() if value not in {"", None}},
+            "imported_at": imported_at,
+            "connector_version": CONNECTOR_VERSION,
+        },
+        sort_keys=True,
+    )
+    return f"{source_name}:{_compact_hash(material, length=16)}"
 
 
 class SunbizDailyClient:
@@ -715,6 +888,7 @@ class SunbizDailyConnector(APIConnectorBase):
         max_pages: int | None = None,
         max_records: int | None = None,
         detail_lookups: bool = False,
+        mode: str | None = None,
         use_mock: bool = False,
         dry_run: bool = False,
         output_dir: Path | str | None = None,
@@ -731,8 +905,18 @@ class SunbizDailyConnector(APIConnectorBase):
         self.base_url = str(self.source_config.get("base_url", "")).rstrip("/")
         self.endpoint = str(self.source_config.get("list_endpoint", "")).strip()
         self.query_params = {}
-        self.use_mock = use_mock or bool(self.source_config.get("prefer_mock_response", False))
-        self.dry_run = dry_run
+        explicit_mode = (mode or "").strip().lower()
+        if explicit_mode not in {"", "mock", "live", "dry-run"}:
+            raise ValueError(f"Unsupported Sunbiz Daily mode '{mode}'.")
+        if dry_run:
+            explicit_mode = "dry-run"
+        elif use_mock:
+            explicit_mode = "mock"
+        elif not explicit_mode:
+            explicit_mode = "mock" if bool(self.source_config.get("prefer_mock_response", False)) else "live"
+        self.execution_mode = explicit_mode
+        self.use_mock = self.execution_mode == "mock"
+        self.dry_run = self.execution_mode == "dry-run"
         self.detail_lookups = detail_lookups
         self.verbose = verbose
         self.output_dir = Path(output_dir or DEFAULT_OUTPUT_DIR)
@@ -742,7 +926,9 @@ class SunbizDailyConnector(APIConnectorBase):
         if not self.raw_snapshot_dir.is_absolute():
             self.raw_snapshot_dir = REPO_ROOT / self.raw_snapshot_dir
 
-        if self.use_mock:
+        if self.dry_run:
+            validate_source(self.source_name)
+        elif self.use_mock:
             validate_source(self.source_name)
         else:
             if not bool(self.source_config.get("enabled", False)):
@@ -752,7 +938,6 @@ class SunbizDailyConnector(APIConnectorBase):
             validate_source(self.source_name, require_live_access=True)
 
         self.imported_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        self.run_id = f"{self.source_name}:{self.imported_at.replace(':', '').replace('-', '')}"
         self.mock_response_path = str(self.source_config.get("mock_response_path", "")).strip()
         self.filters = {
             "sort": str(self.source_config.get("default_sort", "file_date")),
@@ -771,6 +956,7 @@ class SunbizDailyConnector(APIConnectorBase):
             "officer_name": officer_name or "",
             "registered_agent_name": registered_agent_name or "",
         }
+        self.run_id = _build_run_id(self.source_name, self.filters, self.imported_at)
         self.default_page_size = min(max(_safe_int(page_size, _safe_int(self.source_config.get("default_page_size"), 100)), 1), 100)
         self.max_pages = min(max(_safe_int(max_pages, _safe_int(self.source_config.get("max_pages"), 10)), 1), 100)
         max_records_value = max_records if max_records is not None else limit
@@ -786,6 +972,7 @@ class SunbizDailyConnector(APIConnectorBase):
         self.last_diagnostics: list[dict[str, Any]] = []
         self.last_summary: dict[str, Any] = {}
         self.last_records: list[dict[str, Any]] = []
+        self.last_import_manifest: dict[str, Any] = {}
 
     def _append_diagnostic(self, **payload: Any) -> None:
         row = {field: "" for field in DIAGNOSTIC_FIELDS}
@@ -820,6 +1007,21 @@ class SunbizDailyConnector(APIConnectorBase):
             json.dump(snapshot, handle, indent=2, sort_keys=True)
 
     def fetch(self) -> str:
+        if self.dry_run:
+            print("Sunbiz Daily dry-run")
+            print(f"  mode={self.execution_mode}")
+            print(f"  output_dir={self.output_dir}")
+            print(f"  filters={json.dumps({key: value for key, value in self.filters.items() if value}, sort_keys=True)}")
+            self.last_summary.update(
+                {
+                    "response_shapes": [],
+                    "async_jobs": 0,
+                    "truncated_results": False,
+                    "incomplete_reason": "",
+                    "records_fetched": 0,
+                }
+            )
+            return "[]"
         if self.use_mock:
             return json.dumps(self._read_mock_records())
         if not self.client.is_key_present():
@@ -896,7 +1098,7 @@ class SunbizDailyConnector(APIConnectorBase):
                 or (registered_agent_payload.get("address") if isinstance(registered_agent_payload, dict) else ""),
                 role="registered_agent_address",
             )
-            officers = _parse_officers(record.get("officers"))
+            officers = _stable_officers(_parse_officers(record.get("officers")))
             privacy_redacted = bool(record.get("privacy_redacted") or record.get("redacted"))
             incomplete_record = bool(
                 privacy_redacted
@@ -982,9 +1184,10 @@ class SunbizDailyConnector(APIConnectorBase):
         for record in records:
             county = record["county"]
             imported_at = record["imported_at"]
+            business_id = _sunbiz_business_entity_id(record["corporation_number"])
             business_entity = apply_provenance(
                 {
-                    "entity_id": f"business:sunbiz_daily:{record['corporation_number']}",
+                    "entity_id": business_id,
                     "display_name": record["corporation_name"],
                     "entity_type": "business",
                     "source": self.source_name,
@@ -1065,9 +1268,10 @@ class SunbizDailyConnector(APIConnectorBase):
                     entities.append(address_entity)
 
             if record["registered_agent_name"]:
+                registered_agent_source_record_id = f"{record['corporation_number']}:registered_agent"
                 agent_entity = apply_provenance(
                     {
-                        "entity_id": f"registered_agent:{record['registered_agent_normalized_name'] or record['registered_agent_name']}",
+                        "entity_id": _sunbiz_registered_agent_entity_id(record["corporation_number"]),
                         "display_name": record["registered_agent_name"],
                         "entity_type": "registered_agent",
                         "source": self.source_name,
@@ -1095,7 +1299,7 @@ class SunbizDailyConnector(APIConnectorBase):
                     },
                     self.source_name,
                     source_type_hint=source_type,
-                    source_record_id=f"{record['corporation_number']}:registered_agent",
+                    source_record_id=registered_agent_source_record_id,
                     connector_name=self.source_name,
                     imported_at=imported_at,
                     jurisdiction=county,
@@ -1104,13 +1308,14 @@ class SunbizDailyConnector(APIConnectorBase):
                     seen.add(agent_entity["entity_id"])
                     entities.append(agent_entity)
 
-            for index, officer in enumerate(record["officers"], start=1):
+            for officer in record["officers"]:
                 officer_name = officer["original_name"]
                 if not officer_name:
                     continue
+                officer_source_record_id = _sunbiz_officer_source_record_id(record["corporation_number"], officer)
                 officer_entity = apply_provenance(
                     {
-                        "entity_id": f"officer:{officer['normalized_name'] or officer_name}",
+                        "entity_id": _sunbiz_officer_entity_id(record["corporation_number"], officer),
                         "display_name": officer_name,
                         "entity_type": "officer",
                         "source": self.source_name,
@@ -1138,7 +1343,7 @@ class SunbizDailyConnector(APIConnectorBase):
                     },
                     self.source_name,
                     source_type_hint=source_type,
-                    source_record_id=f"{record['corporation_number']}:officer:{index}",
+                    source_record_id=officer_source_record_id,
                     connector_name=self.source_name,
                     imported_at=imported_at,
                     jurisdiction=county,
@@ -1156,10 +1361,10 @@ class SunbizDailyConnector(APIConnectorBase):
             corporation_number = record["corporation_number"]
             imported_at = record["imported_at"]
             jurisdiction = record["county"]
-            business_id = f"business:sunbiz_daily:{corporation_number}"
+            business_id = _sunbiz_business_entity_id(corporation_number)
             principal_address = record["principal_address"]["normalized_full_address"]
             mailing_address = record["mailing_address"]["normalized_full_address"]
-            registered_agent_id = f"registered_agent:{record['registered_agent_normalized_name'] or record['registered_agent_name']}" if record["registered_agent_name"] else ""
+            registered_agent_id = _sunbiz_registered_agent_entity_id(corporation_number) if record["registered_agent_name"] else ""
 
             base_provenance = {
                 "source_type_hint": source_type,
@@ -1261,11 +1466,12 @@ class SunbizDailyConnector(APIConnectorBase):
                         },
                         f"{corporation_number}:registered_agent",
                     )
-            for index, officer in enumerate(record["officers"], start=1):
+            for officer in record["officers"]:
                 officer_name = officer["original_name"]
                 if not officer_name:
                     continue
-                officer_id = f"officer:{officer['normalized_name'] or officer_name}"
+                officer_id = _sunbiz_officer_entity_id(corporation_number, officer)
+                officer_source_record_id = _sunbiz_officer_source_record_id(corporation_number, officer)
                 add_relationship(
                     {
                         "source_entity_id": officer_id,
@@ -1275,7 +1481,7 @@ class SunbizDailyConnector(APIConnectorBase):
                         "relationship_method": "sunbiz_officer",
                         "evidence_summary": "Officer linked to business directly by Sunbiz Daily filing data.",
                     },
-                    f"{corporation_number}:officer:{index}",
+                    officer_source_record_id,
                 )
                 officer_address = normalize_address(officer["address"])
                 if officer_address:
@@ -1288,7 +1494,7 @@ class SunbizDailyConnector(APIConnectorBase):
                             "relationship_method": "sunbiz_officer_address",
                             "evidence_summary": "Officer address explicitly provided in Sunbiz Daily filing data.",
                         },
-                        f"{corporation_number}:officer:{index}",
+                        officer_source_record_id,
                     )
                     add_relationship(
                         {
@@ -1299,7 +1505,7 @@ class SunbizDailyConnector(APIConnectorBase):
                             "relationship_method": "sunbiz_officer_address_compatibility",
                             "evidence_summary": "Compatibility alias for officer address used by downstream analytics.",
                         },
-                        f"{corporation_number}:officer:{index}",
+                        officer_source_record_id,
                     )
         return relationships
 
@@ -1339,7 +1545,8 @@ class SunbizDailyConnector(APIConnectorBase):
             "source_name": self.source_name,
             "source_type": str(self.source_config.get("source_type", "official_api")),
             "api_status": status_code,
-            "live_mode": not self.use_mock,
+            "live_mode": self.execution_mode == "live",
+            "execution_mode": self.execution_mode,
             "key_present": self.client.is_key_present(),
             "config_enabled": bool(self.source_config.get("enabled", False)),
             "last_attempted_import": self.imported_at,
@@ -1372,6 +1579,23 @@ class SunbizDailyConnector(APIConnectorBase):
                 "detail_endpoint_template": self.source_config.get("detail_endpoint_template"),
             },
             "cross_source_matches": 0,
+            "run_id": self.run_id,
+            "connector_version": CONNECTOR_VERSION,
+        }
+        self.last_import_manifest = {
+            "run_id": self.run_id,
+            "connector_version": CONNECTOR_VERSION,
+            "configuration_hash": _compact_hash(json.dumps(self.source_config, sort_keys=True), length=20),
+            "filters": {key: value for key, value in self.filters.items() if value},
+            "start_time": self.imported_at,
+            "completion_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "record_count": summary["records_fetched"],
+            "raw_snapshot_dir": str(self.raw_snapshot_dir),
+            "processed_outputs": [str(path) for path in self.source_config.get("processed_outputs", [])],
+            "result_status": status_code,
+            "truncation_status": summary["truncated_results"],
+            "rate_limit_state": rate_limit_state,
+            "errors": error_message,
         }
         self.last_summary = summary
         return entities, relationships, summary
@@ -1445,70 +1669,180 @@ def refresh_cross_source_artifacts(
     return int(summary.get("cross_source_match_count", 0))
 
 
+def _entity_lookup_from_frame(entities_df: Any) -> dict[str, dict[str, Any]]:
+    return {
+        str(row.get("entity_id", "")): row
+        for _, row in entities_df.iterrows()
+        if str(row.get("entity_id", "")).strip()
+    }
+
+
+def _related_relationships(relationships_df: Any, entity_id: str) -> list[dict[str, Any]]:
+    if relationships_df.empty:
+        return []
+    scoped = relationships_df[
+        (relationships_df["source_entity_id"].astype(str) == entity_id)
+        | (relationships_df["target_entity_id"].astype(str) == entity_id)
+    ]
+    return scoped.to_dict("records")
+
+
+def _summarize_registered_agent_context(
+    *,
+    relationships_df: Any,
+    entity_lookup: dict[str, dict[str, Any]],
+    sunbiz_entity_id: str,
+) -> dict[str, Any]:
+    related = _related_relationships(relationships_df, sunbiz_entity_id)
+    business_targets = {
+        str(row.get("target_entity_id", ""))
+        for row in related
+        if str(row.get("relationship_type", "")) == "REGISTERED_AGENT_FOR" and str(row.get("target_entity_id", "")).strip()
+    }
+    address_targets = {
+        str(row.get("target_entity_id", ""))
+        for row in related
+        if str(row.get("relationship_type", "")) in {"REGISTERED_AGENT_AT_ADDRESS", "REGISTERED_AGENT_ASSOCIATED_WITH_ADDRESS"}
+    }
+    source_record_prefixes = {
+        str(row.get("source_record_id", "")).split(":")[0]
+        for row in related
+        if str(row.get("source_record_id", "")).strip()
+    }
+    return {
+        "registered_agent_business_count": len(business_targets),
+        "registered_agent_address_count": len(address_targets),
+        "registered_agent_is_possible_service_provider": len(business_targets) >= 5,
+        "concentration_by_address": len(address_targets),
+        "concentration_by_officer": len(source_record_prefixes),
+        "corroborating_non_agent_relationships": int(
+            sum(
+                1
+                for row in related
+                if str(row.get("relationship_type", "")) not in {"REGISTERED_AGENT_FOR", "REGISTERED_AGENT_AT_ADDRESS", "REGISTERED_AGENT_ASSOCIATED_WITH_ADDRESS"}
+            )
+        ),
+    }
+
+
+def _row_text(row: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = _stringify(row.get(key))
+        if value:
+            return value
+    return ""
+
+
+def _name_frequency(entities_df: Any, normalized_name: str) -> int:
+    if entities_df.empty or not normalized_name:
+        return 0
+    series = entities_df.get("normalized_name")
+    if series is None:
+        return 0
+    return int(series.astype(str).str.strip().eq(normalized_name).sum())
+
+
+def _decision_for_match(
+    *,
+    match_method: str,
+    person_name_match: bool,
+    address_match_scope: str,
+    business_name_match: bool,
+    privacy_redacted: bool,
+    incomplete_reason: str,
+    name_frequency: int,
+    is_po_box: bool,
+) -> tuple[str, float, bool, int, int, str]:
+    if privacy_redacted:
+        return "INSUFFICIENT_DATA", 0.2, False, 0, 0, "Privacy-redacted filing fields prevent an exact match decision."
+    if incomplete_reason:
+        return "INSUFFICIENT_DATA", 0.25, False, 0, 0, incomplete_reason
+    if is_po_box and match_method == "property_situs_matches_business_address":
+        return "REJECTED", 0.05, False, 0, 1, "PO Box values are not treated as physical parcel situs matches."
+    if person_name_match and address_match_scope == "EXACT_UNIT":
+        downgraded = name_frequency >= 2
+        return ("REVIEW_STRONG" if downgraded else "ACCEPTED_EXACT"), (0.82 if downgraded else 0.97), downgraded, 2, 0, (
+            "Exact normalized person name and exact unit-level address matched."
+            if not downgraded
+            else "Exact name and unit-level address matched, but the imported Sunbiz set contains this name multiple times."
+        )
+    if person_name_match and address_match_scope == "EXACT_BUILDING":
+        downgraded = name_frequency >= 2
+        return "REVIEW_STRONG", (0.72 if downgraded else 0.8), downgraded, 2, 0, "Exact name matched at the same building, but unit-level specificity is unavailable or ambiguous."
+    if business_name_match and address_match_scope in {"EXACT_UNIT", "EXACT_BUILDING"}:
+        return "REVIEW_STRONG", 0.78, False, 2, 0, "Business name and address aligned across parcel and Sunbiz records."
+    if person_name_match and address_match_scope in {"MAILING_ONLY", "GENERALIZED"}:
+        downgraded = name_frequency >= 2
+        return "REVIEW_WEAK", (0.42 if downgraded else 0.5), downgraded, 1, 0, "Name evidence exists, but the address is only generalized or mailing-only."
+    if person_name_match:
+        downgraded = name_frequency >= 2
+        return "REVIEW_WEAK", (0.3 if downgraded else 0.36), downgraded, 1, 0, "Name-only or weakly corroborated person match suppressed from exact acceptance."
+    return "REJECTED", 0.1, False, 0, 1, "The candidate lacked sufficient corroboration for a reliable Sunbiz-to-parcel match."
+
+
+def _sample_rows_by_decision(rows: list[dict[str, Any]], *, max_per_decision: int = 5) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(str(row.get("decision", "")), []).append(row)
+    sampled: list[dict[str, Any]] = []
+    for decision in sorted(grouped):
+        sampled.extend(grouped[decision][:max_per_decision])
+    return sampled
+
+
 def build_sunbiz_parcel_matches(
     *,
     cross_source_matches_path: Path,
     entities_path: Path,
+    relationships_path: Path,
     output_path: Path,
+    quality_report_path: Path,
+    quality_samples_path: Path,
     source_name: str,
     imported_at: str,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if not cross_source_matches_path.exists() or cross_source_matches_path.stat().st_size == 0:
-        write_csv(output_path, [], [
-            "match_id",
-            "sunbiz_corporation_number",
-            "sunbiz_business_name",
-            "sunbiz_entity_id",
-            "parcel_entity_id",
-            "parcel_id",
-            "match_type",
-            "match_value",
-            "normalized_match_value",
-            "match_confidence",
-            "decision",
-            "sunbiz_source_record_id",
-            "parcel_source_record_id",
-            "sunbiz_source_name",
-            "parcel_source_name",
-            "explanation",
-            "recommended_review",
-            "imported_at",
-        ])
-        return []
+        write_csv(output_path, [], MATCH_FIELDS)
+        write_csv(quality_samples_path, [], MATCH_FIELDS)
+        empty_report = {
+            "total_candidate_comparisons": 0,
+            "total_exact_matches": 0,
+            "accepted_exact_matches": 0,
+            "strong_review_matches": 0,
+            "weak_review_matches": 0,
+            "rejected_matches": 0,
+            "insufficient_data_records": 0,
+            "name_only_candidates_suppressed": 0,
+            "common_name_candidates_downgraded": 0,
+            "po_box_physical_matches_suppressed": 0,
+            "unit_level_conflicts": 0,
+            "privacy_redacted_records_excluded_from_exact_decisions": 0,
+            "duplicate_candidates_removed": 0,
+            "source_coverage": [],
+            "filters_used": {},
+        }
+        write_json(quality_report_path, empty_report)
+        return [], empty_report
     matches_df = json.loads("[]")
     try:
         import pandas as pd
 
         matches_df = pd.read_csv(cross_source_matches_path).fillna("")
         entities_df = pd.read_csv(entities_path).fillna("") if entities_path.exists() and entities_path.stat().st_size > 0 else pd.DataFrame()
+        relationships_df = pd.read_csv(relationships_path).fillna("") if relationships_path.exists() and relationships_path.stat().st_size > 0 else pd.DataFrame()
     except Exception:
-        write_csv(output_path, [], [
-            "match_id",
-            "sunbiz_corporation_number",
-            "sunbiz_business_name",
-            "sunbiz_entity_id",
-            "parcel_entity_id",
-            "parcel_id",
-            "match_type",
-            "match_value",
-            "normalized_match_value",
-            "match_confidence",
-            "decision",
-            "sunbiz_source_record_id",
-            "parcel_source_record_id",
-            "sunbiz_source_name",
-            "parcel_source_name",
-            "explanation",
-            "recommended_review",
-            "imported_at",
-        ])
-        return []
+        write_csv(output_path, [], MATCH_FIELDS)
+        write_csv(quality_samples_path, [], MATCH_FIELDS)
+        report = {
+            "total_candidate_comparisons": 0,
+            "rejected_matches": 0,
+            "filters_used": {},
+            "source_coverage": [],
+        }
+        write_json(quality_report_path, report)
+        return [], report
 
-    entity_lookup = {
-        str(row.get("entity_id", "")): row
-        for _, row in entities_df.iterrows()
-        if str(row.get("entity_id", "")).strip()
-    }
+    entity_lookup = _entity_lookup_from_frame(entities_df)
     rows: list[dict[str, Any]] = []
     accepted_methods = {
         "property_situs_matches_business_address",
@@ -1516,6 +1850,13 @@ def build_sunbiz_parcel_matches(
         "parcel_owner_matches_person_with_secondary",
         "parcel_owner_matches_business_name",
     }
+    duplicate_count = 0
+    name_only_suppressed = 0
+    common_name_downgraded = 0
+    po_box_suppressed = 0
+    privacy_excluded = 0
+    unit_conflicts = 0
+    seen_matches: set[str] = set()
     for _, row in matches_df.iterrows():
         left_source_name = str(row.get("left_source_name", ""))
         right_source_name = str(row.get("right_source_name", ""))
@@ -1531,49 +1872,123 @@ def build_sunbiz_parcel_matches(
         parcel_source_record_id = str(row.get("right_source_record_id" if sunbiz_is_left else "left_source_record_id", ""))
         entity_row = entity_lookup.get(sunbiz_entity_id, {})
         parcel_row = entity_lookup.get(parcel_entity_id, {})
+        match_id = str(row.get("cross_source_match_id", ""))
+        if match_id in seen_matches:
+            duplicate_count += 1
+            continue
+        seen_matches.add(match_id)
+        normalized_name = _row_text(entity_row, "normalized_name")
+        person_name = _row_text(entity_row, "display_name", "original_name")
+        original_sunbiz_address = _row_text(entity_row, "address_1", "display_name")
+        if not original_sunbiz_address and "business" in sunbiz_entity_id:
+            original_sunbiz_address = _row_text(entity_row, "display_name")
+        normalized_sunbiz_address = _row_text(entity_row, "display_name")
+        original_parcel_address = _row_text(parcel_row, "address_1", "display_name", "original_name")
+        normalized_parcel_address = _row_text(parcel_row, "display_name")
+        if match_method == "property_situs_matches_business_address":
+            original_parcel_address = _row_text(parcel_row, "address_1", "display_name")
+        name_frequency = _name_frequency(entities_df, normalized_name)
+        privacy_redacted = str(entity_row.get("privacy_redacted", "")).lower() == "true"
+        incomplete_reason = ""
+        if str(entity_row.get("incomplete_record", "")).lower() == "true":
+            incomplete_reason = "Sunbiz source record is incomplete."
+        address_match_scope = _classify_address_match_scope(
+            sunbiz_original=original_sunbiz_address,
+            sunbiz_normalized=normalized_sunbiz_address,
+            parcel_original=original_parcel_address,
+            parcel_normalized=normalized_parcel_address,
+        )
+        person_name_match = match_method == "parcel_owner_matches_person_with_secondary"
+        business_name_match = match_method == "parcel_owner_matches_business_name"
+        decision, confidence, downgraded, corroborating_count, conflicting_count, rationale = _decision_for_match(
+            match_method=match_method,
+            person_name_match=person_name_match,
+            address_match_scope=address_match_scope,
+            business_name_match=business_name_match,
+            privacy_redacted=privacy_redacted,
+            incomplete_reason=incomplete_reason,
+            name_frequency=name_frequency,
+            is_po_box=_is_po_box_text(original_sunbiz_address) or _is_po_box_text(original_parcel_address),
+        )
+        if decision == "REVIEW_WEAK" and person_name_match and address_match_scope in {"INCOMPLETE", "GENERALIZED", "MAILING_ONLY"}:
+            name_only_suppressed += 1
+        if downgraded:
+            common_name_downgraded += 1
+        if decision == "REJECTED" and "PO Box" in rationale:
+            po_box_suppressed += 1
+        if privacy_redacted and decision == "INSUFFICIENT_DATA":
+            privacy_excluded += 1
+        if address_match_scope == "GENERALIZED" and person_name_match:
+            unit_conflicts += 1
+        agent_context = _summarize_registered_agent_context(
+            relationships_df=relationships_df,
+            entity_lookup=entity_lookup,
+            sunbiz_entity_id=sunbiz_entity_id,
+        )
         rows.append(
             {
-                "match_id": str(row.get("cross_source_match_id", "")),
-                "sunbiz_corporation_number": sunbiz_source_record_id.split(":")[0],
-                "sunbiz_business_name": str(entity_row.get("display_name", "")),
+                "match_id": match_id,
+                "decision": decision,
+                "match_type": match_method,
+                "match_confidence": round(confidence, 4),
                 "sunbiz_entity_id": sunbiz_entity_id,
                 "parcel_entity_id": parcel_entity_id,
-                "parcel_id": str(parcel_row.get("display_name", parcel_source_record_id)),
-                "match_type": match_method,
-                "match_value": str(row.get("canonical_entity_id", "")),
-                "normalized_match_value": str(row.get("canonical_entity_id", "")),
-                "match_confidence": row.get("confidence", ""),
-                "decision": str(row.get("decision", "")),
+                "parcel_id": _row_text(parcel_row, "display_name", "original_name", "entity_id"),
+                "corporation_number": sunbiz_source_record_id.split(":")[0],
+                "business_name": _row_text(entity_row, "display_name", "original_name"),
+                "person_name": person_name,
+                "person_role": _row_text(entity_row, "entity_type"),
+                "original_sunbiz_address": original_sunbiz_address,
+                "normalized_sunbiz_address": normalized_sunbiz_address,
+                "original_parcel_address": original_parcel_address,
+                "normalized_parcel_address": normalized_parcel_address,
+                "address_match_scope": address_match_scope,
+                "person_name_match": person_name_match,
+                "address_match": address_match_scope in {"EXACT_UNIT", "EXACT_BUILDING", "MAILING_ONLY"},
+                "business_name_match": business_name_match,
+                "corroborating_field_count": corroborating_count,
+                "conflicting_field_count": conflicting_count,
+                "name_frequency": name_frequency,
+                "common_name_downgraded": downgraded,
+                "privacy_redacted": privacy_redacted,
+                "insufficient_data_reason": incomplete_reason if decision == "INSUFFICIENT_DATA" else "",
+                "registered_agent_business_count": agent_context["registered_agent_business_count"],
+                "registered_agent_address_count": agent_context["registered_agent_address_count"],
+                "registered_agent_is_possible_service_provider": agent_context["registered_agent_is_possible_service_provider"],
+                "concentration_by_address": agent_context["concentration_by_address"],
+                "concentration_by_officer": agent_context["concentration_by_officer"],
+                "corroborating_non_agent_relationships": agent_context["corroborating_non_agent_relationships"],
                 "sunbiz_source_record_id": sunbiz_source_record_id,
                 "parcel_source_record_id": parcel_source_record_id,
                 "sunbiz_source_name": source_name,
                 "parcel_source_name": right_source_name if sunbiz_is_left else left_source_name,
-                "explanation": str(row.get("evidence", "")),
-                "recommended_review": "Review both parcel and corporate records side by side before treating this as a meaningful investigative lead.",
+                "explanation": f"{rationale} Existing cross-source evidence: {str(row.get('evidence', ''))}",
+                "recommended_review": "Verify corporation filing details, parcel ownership timing, and whether the address match is unit-level or only building-level before treating this as a lead.",
                 "imported_at": imported_at,
             }
         )
-    write_csv(output_path, rows, [
-        "match_id",
-        "sunbiz_corporation_number",
-        "sunbiz_business_name",
-        "sunbiz_entity_id",
-        "parcel_entity_id",
-        "parcel_id",
-        "match_type",
-        "match_value",
-        "normalized_match_value",
-        "match_confidence",
-        "decision",
-        "sunbiz_source_record_id",
-        "parcel_source_record_id",
-        "sunbiz_source_name",
-        "parcel_source_name",
-        "explanation",
-        "recommended_review",
-        "imported_at",
-    ])
-    return rows
+    write_csv(output_path, rows, MATCH_FIELDS)
+    sampled_rows = _sample_rows_by_decision(rows)
+    write_csv(quality_samples_path, sampled_rows, MATCH_FIELDS)
+    report = {
+        "total_candidate_comparisons": len(rows),
+        "total_exact_matches": int(sum(1 for row in rows if str(row.get("address_match_scope", "")).startswith("EXACT_"))),
+        "accepted_exact_matches": int(sum(1 for row in rows if row.get("decision") == "ACCEPTED_EXACT")),
+        "strong_review_matches": int(sum(1 for row in rows if row.get("decision") == "REVIEW_STRONG")),
+        "weak_review_matches": int(sum(1 for row in rows if row.get("decision") == "REVIEW_WEAK")),
+        "rejected_matches": int(sum(1 for row in rows if row.get("decision") == "REJECTED")),
+        "insufficient_data_records": int(sum(1 for row in rows if row.get("decision") == "INSUFFICIENT_DATA")),
+        "name_only_candidates_suppressed": name_only_suppressed,
+        "common_name_candidates_downgraded": common_name_downgraded,
+        "po_box_physical_matches_suppressed": po_box_suppressed,
+        "unit_level_conflicts": unit_conflicts,
+        "privacy_redacted_records_excluded_from_exact_decisions": privacy_excluded,
+        "duplicate_candidates_removed": duplicate_count,
+        "source_coverage": sorted({str(row.get("sunbiz_source_name", "")) for row in rows if str(row.get("sunbiz_source_name", "")).strip()}),
+        "filters_used": {"source_name": source_name},
+    }
+    write_json(quality_report_path, report)
+    return rows, report
 
 
 def enrich_cross_source_matches_with_sunbiz_fields(
@@ -1596,7 +2011,27 @@ def enrich_cross_source_matches_with_sunbiz_fields(
         return
     parcel_matches_df = parcel_matches_df.rename(columns={"match_id": "cross_source_match_id"})
     enriched = cross_source_df.merge(
-        parcel_matches_df[["cross_source_match_id", "sunbiz_corporation_number", "sunbiz_business_name", "parcel_id"]],
+        parcel_matches_df[
+            [
+                "cross_source_match_id",
+                "corporation_number",
+                "business_name",
+                "parcel_id",
+                "match_type",
+                "match_confidence",
+                "address_match_scope",
+                "person_role",
+                "name_frequency",
+                "common_name_downgraded",
+                "privacy_redacted",
+                "insufficient_data_reason",
+            ]
+        ].rename(
+            columns={
+                "corporation_number": "sunbiz_corporation_number",
+                "business_name": "sunbiz_business_name",
+            }
+        ),
         on="cross_source_match_id",
         how="left",
     )
@@ -1636,8 +2071,10 @@ def main() -> None:
     parser.add_argument("--max-pages", type=int, default=None)
     parser.add_argument("--max-records", type=int, default=None)
     parser.add_argument("--detail-lookups", action="store_true")
-    parser.add_argument("--mock", action="store_true")
-    parser.add_argument("--dry-run", action="store_true")
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument("--mock", action="store_true")
+    mode_group.add_argument("--live", action="store_true")
+    mode_group.add_argument("--dry-run", action="store_true")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--businesses-path", default=str(DEFAULT_BUSINESSES_PATH))
     parser.add_argument("--entities-path", default=str(DEFAULT_ENTITIES_PATH))
@@ -1645,6 +2082,9 @@ def main() -> None:
     parser.add_argument("--import-summary-path", default=str(DEFAULT_IMPORT_SUMMARY_PATH))
     parser.add_argument("--diagnostics-path", default=str(DEFAULT_DIAGNOSTICS_PATH))
     parser.add_argument("--matches-path", default=str(DEFAULT_MATCHES_PATH))
+    parser.add_argument("--match-quality-report-path", default=str(DEFAULT_MATCH_QUALITY_REPORT_PATH))
+    parser.add_argument("--match-quality-samples-path", default=str(DEFAULT_MATCH_QUALITY_SAMPLES_PATH))
+    parser.add_argument("--import-manifest-path", default=str(DEFAULT_IMPORT_MANIFEST_PATH))
     parser.add_argument("--status-path", default=str(DEFAULT_STATUS_PATH))
     parser.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
     parser.add_argument("--skip-cross-source-refresh", action="store_true")
@@ -1672,6 +2112,15 @@ def main() -> None:
     matches_path = Path(args.matches_path)
     if not matches_path.is_absolute():
         matches_path = REPO_ROOT / matches_path
+    match_quality_report_path = Path(args.match_quality_report_path)
+    if not match_quality_report_path.is_absolute():
+        match_quality_report_path = REPO_ROOT / match_quality_report_path
+    match_quality_samples_path = Path(args.match_quality_samples_path)
+    if not match_quality_samples_path.is_absolute():
+        match_quality_samples_path = REPO_ROOT / match_quality_samples_path
+    import_manifest_path = Path(args.import_manifest_path)
+    if not import_manifest_path.is_absolute():
+        import_manifest_path = REPO_ROOT / import_manifest_path
     status_path = Path(args.status_path)
     if not status_path.is_absolute():
         status_path = REPO_ROOT / status_path
@@ -1681,6 +2130,11 @@ def main() -> None:
 
     start_time = time.time()
     try:
+        mode = "live"
+        if args.mock:
+            mode = "mock"
+        elif args.dry_run:
+            mode = "dry-run"
         connector = SunbizDailyConnector(
             county=args.county,
             city=args.city,
@@ -1700,6 +2154,7 @@ def main() -> None:
             max_pages=args.max_pages,
             max_records=args.max_records,
             detail_lookups=args.detail_lookups,
+            mode=mode,
             use_mock=args.mock,
             dry_run=args.dry_run,
             output_dir=output_dir,
@@ -1728,10 +2183,13 @@ def main() -> None:
                     sunbiz_entities_path=entities_path,
                     sunbiz_relationships_path=relationships_path,
                 )
-            build_sunbiz_parcel_matches(
+            _, quality_report = build_sunbiz_parcel_matches(
                 cross_source_matches_path=entities_path.parent / "cross_source_matches.csv",
                 entities_path=entities_path.parent / "entities.csv",
+                relationships_path=entities_path.parent / "relationships.csv",
                 output_path=matches_path,
+                quality_report_path=match_quality_report_path,
+                quality_samples_path=match_quality_samples_path,
                 source_name=connector.source_name,
                 imported_at=connector.imported_at,
             )
@@ -1739,7 +2197,9 @@ def main() -> None:
                 cross_source_matches_path=entities_path.parent / "cross_source_matches.csv",
                 sunbiz_parcel_matches_path=matches_path,
             )
+            summary["match_quality"] = quality_report
             write_json(import_summary_path, summary)
+            write_json(import_manifest_path, connector.last_import_manifest)
             if import_summary_path.resolve() != DEFAULT_IMPORT_SUMMARY_PATH.resolve():
                 write_json(DEFAULT_IMPORT_SUMMARY_PATH, summary)
             write_json(status_path, summary)

@@ -28,6 +28,7 @@ from src.connectors.open_data_api import DEFAULT_ENTITIES_PATH as DEFAULT_API_EN
 from src.connectors.open_data_api import DEFAULT_RELATIONSHIPS_PATH as DEFAULT_API_RELATIONSHIPS_PATH
 from src.connectors.source_manifest import ensure_local_only_path, validate_source
 from src.connectors.sunbiz_daily_connector import DEFAULT_STATUS_PATH as DEFAULT_SUNBIZ_DAILY_STATUS_PATH
+from src.connectors.sunbiz_daily_connector import build_sunbiz_parcel_matches, enrich_cross_source_matches_with_sunbiz_fields
 from src.connectors.sunbiz.local_file_connector import DEFAULT_SUNBIZ_INPUT_PATH
 from src.health_check import check_project_health
 from src.ingest.generate_synthetic_data import generate_synthetic_dataset
@@ -158,6 +159,15 @@ def run_pipeline(
     entity_risk_path: Optional[Path | str] = None,
     include_connectors: bool = False,
     include_sunbiz: bool = False,
+    sunbiz_county: str = "Hillsborough",
+    sunbiz_city: str | None = None,
+    sunbiz_zip: str | None = None,
+    sunbiz_status: str = "active",
+    sunbiz_start_date: str | None = None,
+    sunbiz_end_date: str | None = None,
+    sunbiz_max_records: int = 100,
+    sunbiz_page_size: int | None = None,
+    sunbiz_mock: bool = False,
     run_health_check: bool = False,
     reset: bool = False,
     clear_lead_packages_flag: bool = False,
@@ -190,6 +200,7 @@ def run_pipeline(
     print(f"Pipeline: processed dir {processed_path}")
     print(f"Pipeline: include_connectors={include_connectors}")
     print(f"Pipeline: include_sunbiz={include_sunbiz}")
+    print(f"Pipeline: sunbiz_mode={'mock' if sunbiz_mock else 'live'}")
     print(f"Pipeline: run_health_check={run_health_check}")
     print(f"Pipeline: reset={reset}")
     print(f"Pipeline: clear_lead_packages={clear_lead_packages_flag}")
@@ -250,39 +261,56 @@ def run_pipeline(
 
         if include_sunbiz:
             try:
-                validate_source(DEFAULT_SUNBIZ_DAILY_SOURCE_NAME, require_live_access=True)
+                validate_source(DEFAULT_SUNBIZ_DAILY_SOURCE_NAME, require_live_access=not sunbiz_mock)
                 connector_script = Path(__file__).resolve().parents[0] / "connectors" / "sunbiz_daily_connector.py"
                 print(f"  Running Sunbiz Daily API import for source {DEFAULT_SUNBIZ_DAILY_SOURCE_NAME}")
-                subprocess.run(
-                    [
-                        sys.executable,
-                        str(connector_script),
-                        "--county",
-                        "Hillsborough",
-                        "--limit",
-                        "100",
-                        "--output-dir",
-                        str(processed_path),
-                        "--entities-path",
-                        str(sunbiz_entities_path),
-                        "--relationships-path",
-                        str(sunbiz_relationships_path),
-                        "--businesses-path",
-                        str(processed_path / "sunbiz_daily_businesses.csv"),
-                        "--import-summary-path",
-                        str(processed_path / "sunbiz_daily_import_summary.json"),
-                        "--diagnostics-path",
-                        str(processed_path / "sunbiz_daily_import_diagnostics.csv"),
-                        "--matches-path",
-                        str(processed_path / "sunbiz_parcel_matches.csv"),
-                        "--status-path",
-                        str(processed_path / DEFAULT_SUNBIZ_DAILY_STATUS_PATH.name),
-                        "--db-path",
-                        str(db_path),
-                        "--skip-cross-source-refresh",
-                    ],
-                    check=True,
-                )
+                sunbiz_command = [
+                    sys.executable,
+                    str(connector_script),
+                    "--mock" if sunbiz_mock else "--live",
+                    "--county",
+                    sunbiz_county,
+                    "--status",
+                    sunbiz_status,
+                    "--max-records",
+                    str(sunbiz_max_records),
+                    "--output-dir",
+                    str(processed_path),
+                    "--entities-path",
+                    str(sunbiz_entities_path),
+                    "--relationships-path",
+                    str(sunbiz_relationships_path),
+                    "--businesses-path",
+                    str(processed_path / "sunbiz_daily_businesses.csv"),
+                    "--import-summary-path",
+                    str(processed_path / "sunbiz_daily_import_summary.json"),
+                    "--diagnostics-path",
+                    str(processed_path / "sunbiz_daily_import_diagnostics.csv"),
+                    "--matches-path",
+                    str(processed_path / "sunbiz_parcel_matches.csv"),
+                    "--match-quality-report-path",
+                    str(processed_path / "sunbiz_match_quality_report.json"),
+                    "--match-quality-samples-path",
+                    str(processed_path / "sunbiz_match_quality_samples.csv"),
+                    "--import-manifest-path",
+                    str(processed_path / "sunbiz_daily_import_manifest.json"),
+                    "--status-path",
+                    str(processed_path / DEFAULT_SUNBIZ_DAILY_STATUS_PATH.name),
+                    "--db-path",
+                    str(db_path),
+                    "--skip-cross-source-refresh",
+                ]
+                if sunbiz_city:
+                    sunbiz_command.extend(["--city", sunbiz_city])
+                if sunbiz_zip:
+                    sunbiz_command.extend(["--zip", sunbiz_zip])
+                if sunbiz_start_date:
+                    sunbiz_command.extend(["--start-date", sunbiz_start_date])
+                if sunbiz_end_date:
+                    sunbiz_command.extend(["--end-date", sunbiz_end_date])
+                if sunbiz_page_size:
+                    sunbiz_command.extend(["--page-size", str(sunbiz_page_size)])
+                subprocess.run(sunbiz_command, check=True)
                 print(f"  Wrote Sunbiz Daily entities to {sunbiz_entities_path}")
                 print(f"  Wrote Sunbiz Daily relationships to {sunbiz_relationships_path}")
                 connector_entity_paths.append(sunbiz_entities_path)
@@ -512,6 +540,23 @@ def run_pipeline(
         f"rejected={cross_source_summary['rejected_match_count']}"
     )
     if include_sunbiz:
+        try:
+            _, quality_report = build_sunbiz_parcel_matches(
+                cross_source_matches_path=processed_path / DEFAULT_CROSS_SOURCE_MATCHES_PATH.name,
+                entities_path=entities_path,
+                relationships_path=relationships_path,
+                output_path=processed_path / "sunbiz_parcel_matches.csv",
+                quality_report_path=processed_path / "sunbiz_match_quality_report.json",
+                quality_samples_path=processed_path / "sunbiz_match_quality_samples.csv",
+                source_name=DEFAULT_SUNBIZ_DAILY_SOURCE_NAME,
+                imported_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            )
+            enrich_cross_source_matches_with_sunbiz_fields(
+                cross_source_matches_path=processed_path / DEFAULT_CROSS_SOURCE_MATCHES_PATH.name,
+                sunbiz_parcel_matches_path=processed_path / "sunbiz_parcel_matches.csv",
+            )
+        except Exception as exc:
+            print(f"  Sunbiz match-quality refresh skipped: {exc}")
         status_path = processed_path / DEFAULT_SUNBIZ_DAILY_STATUS_JSON_PATH.name
         if status_path.exists() and status_path.stat().st_size > 0:
             try:
@@ -519,6 +564,7 @@ def run_pipeline(
                     status_payload = json.load(handle)
                 if isinstance(status_payload, dict):
                     status_payload["cross_source_matches"] = int(cross_source_summary.get("cross_source_match_count", 0))
+                    status_payload["match_quality_report"] = "data/processed/sunbiz_match_quality_report.json"
                     with status_path.open("w", encoding="utf-8") as handle:
                         json.dump(status_payload, handle, indent=2)
             except Exception:
@@ -669,6 +715,15 @@ def main() -> None:
         action="store_true",
         help="Run the authenticated Sunbiz Daily API connector and merge its outputs into the local pipeline.",
     )
+    parser.add_argument("--sunbiz-county", default="Hillsborough", help="County filter passed to the Sunbiz Daily connector.")
+    parser.add_argument("--sunbiz-city", default=None, help="Optional city filter passed to the Sunbiz Daily connector.")
+    parser.add_argument("--sunbiz-zip", default=None, help="Optional ZIP filter passed to the Sunbiz Daily connector.")
+    parser.add_argument("--sunbiz-status", default="active", help="Status filter passed to the Sunbiz Daily connector.")
+    parser.add_argument("--sunbiz-start-date", default=None, help="Optional start date filter passed to the Sunbiz Daily connector.")
+    parser.add_argument("--sunbiz-end-date", default=None, help="Optional end date filter passed to the Sunbiz Daily connector.")
+    parser.add_argument("--sunbiz-max-records", type=int, default=100, help="Maximum Sunbiz filings to fetch in a pipeline run.")
+    parser.add_argument("--sunbiz-page-size", type=int, default=None, help="Optional Sunbiz page size override.")
+    parser.add_argument("--sunbiz-mock", action="store_true", help="Run the Sunbiz Daily connector in explicit mock mode.")
     parser.add_argument(
         "--health-check",
         action="store_true",
@@ -698,6 +753,15 @@ def main() -> None:
             entity_risk_path=args.entity_risk_path,
             include_connectors=args.include_connectors,
             include_sunbiz=args.include_sunbiz,
+            sunbiz_county=args.sunbiz_county,
+            sunbiz_city=args.sunbiz_city,
+            sunbiz_zip=args.sunbiz_zip,
+            sunbiz_status=args.sunbiz_status,
+            sunbiz_start_date=args.sunbiz_start_date,
+            sunbiz_end_date=args.sunbiz_end_date,
+            sunbiz_max_records=args.sunbiz_max_records,
+            sunbiz_page_size=args.sunbiz_page_size,
+            sunbiz_mock=args.sunbiz_mock,
             run_health_check=args.health_check,
             reset=args.reset,
             clear_lead_packages_flag=args.clear_lead_packages,

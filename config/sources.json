@@ -61,7 +61,10 @@
       "data/processed/sunbiz_daily_relationships.csv",
       "data/processed/sunbiz_daily_import_summary.json",
       "data/processed/sunbiz_daily_import_diagnostics.csv",
-      "data/processed/sunbiz_parcel_matches.csv"
+      "data/processed/sunbiz_parcel_matches.csv",
+      "data/processed/sunbiz_match_quality_report.json",
+      "data/processed/sunbiz_match_quality_samples.csv",
+      "data/processed/sunbiz_daily_import_manifest.json"
     ],
     "notes": "Primary corporate-record connector for OpenFraud using the authenticated Sunbiz Daily API. Use bounded requests, respect the account rate limit, and keep all processing local."
   },

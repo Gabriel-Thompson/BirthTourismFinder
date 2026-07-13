@@ -90,10 +90,12 @@ python src/connectors/county_clerk/local_file_connector.py
 Sunbiz Daily:
 ```bash
 python -m src.connectors.sunbiz_daily_connector --mock --county Hillsborough --max-records 100
-python -m src.connectors.sunbiz_daily_connector --county Hillsborough --status active --max-records 100
+python -m src.connectors.sunbiz_daily_connector --dry-run --county Hillsborough --status active --max-records 100
+python -m src.connectors.sunbiz_daily_connector --live --county Hillsborough --status active --max-records 100
 python -m src.connectors.sunbiz_daily_connector --zip 336 --status active --max-records 500
 python -m src.connectors.sunbiz_daily_connector --start-date 2026-01-01 --end-date 2026-07-13 --max-records 500
 python src/run_pipeline.py --include-sunbiz --include-connectors --health-check
+python src/run_pipeline.py --include-sunbiz --sunbiz-mock --sunbiz-county Hillsborough --sunbiz-max-records 100 --include-connectors --health-check
 ```
 
 Reporting and validation:
@@ -735,6 +737,9 @@ Outputs:
 - `data/processed/sunbiz_daily_import_summary.json`
 - `data/processed/sunbiz_daily_import_diagnostics.csv`
 - `data/processed/sunbiz_parcel_matches.csv`
+- `data/processed/sunbiz_match_quality_report.json`
+- `data/processed/sunbiz_match_quality_samples.csv`
+- `data/processed/sunbiz_daily_import_manifest.json`
 
 ## Phase 3 Note
 
