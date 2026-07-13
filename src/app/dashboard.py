@@ -202,7 +202,7 @@ def main() -> None:
         filtered_entities_df,
         filtered_relationships_df,
         filtered_entity_risk_df,
-        manager.get("report"),
+        filtered_prioritized_leads_df,
     )
     render_top_metrics(
         pipeline_summary=pipeline_summary,

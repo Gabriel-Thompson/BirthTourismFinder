@@ -94,6 +94,99 @@ def test_build_dashboard_metrics_counts_expected_values() -> None:
     assert metrics["high_confidence_leads"] == 2
 
 
+def test_build_dashboard_metrics_supports_lowercase_prioritized_lead_schema() -> None:
+    metrics = build_dashboard_metrics(
+        pd.DataFrame([{"risk_contribution": 10}]),
+        pd.DataFrame([{"entity_id": "e1"}]),
+        pd.DataFrame([{"source_entity_id": "e1"}]),
+        pd.DataFrame([{"risk_level": "High"}]),
+        pd.DataFrame(
+            [
+                {"priority": "CRITICAL", "confidence": "VERY_HIGH", "independent_source_count": "2"},
+                {"priority": "HIGH", "confidence": "HIGH", "cross_source_match_count": "0"},
+            ]
+        ),
+    )
+
+    assert metrics["critical_leads"] == 1
+    assert metrics["high_priority_leads"] == 2
+    assert metrics["high_confidence_leads"] == 2
+    assert metrics["cross_source_leads"] == 1
+
+
+def test_build_dashboard_metrics_is_schema_safe_for_empty_or_missing_columns() -> None:
+    metrics = build_dashboard_metrics(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame([{"title": "lead"}]),
+    )
+
+    assert metrics["critical_leads"] == 0
+    assert metrics["high_priority_leads"] == 0
+    assert metrics["high_confidence_leads"] == 0
+    assert metrics["cross_source_leads"] == 0
+
+
+def test_build_dashboard_metrics_handles_missing_priority_column() -> None:
+    metrics = build_dashboard_metrics(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame([{"Confidence": "High", "Supporting Source Count": "2"}]),
+    )
+
+    assert metrics["critical_leads"] == 0
+    assert metrics["high_priority_leads"] == 0
+    assert metrics["high_confidence_leads"] == 1
+    assert metrics["cross_source_leads"] == 1
+
+
+def test_build_dashboard_metrics_handles_missing_confidence_column() -> None:
+    metrics = build_dashboard_metrics(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame([{"Priority": "Critical", "Supporting Source Count": "2"}]),
+    )
+
+    assert metrics["critical_leads"] == 1
+    assert metrics["high_priority_leads"] == 1
+    assert metrics["high_confidence_leads"] == 0
+
+
+def test_build_dashboard_metrics_handles_missing_supporting_source_columns() -> None:
+    metrics = build_dashboard_metrics(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame([{"Priority": "High", "Confidence": "Very High"}]),
+    )
+
+    assert metrics["cross_source_leads"] == 0
+
+
+def test_build_dashboard_metrics_handles_numeric_source_counts_stored_as_strings() -> None:
+    metrics = build_dashboard_metrics(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(
+            [
+                {"priority": "HIGH", "confidence": "HIGH", "independent_source_count": "2"},
+                {"priority": "LOW", "confidence": "LOW", "cross_source_match_count": "3"},
+            ]
+        ),
+    )
+
+    assert metrics["cross_source_leads"] == 2
+
+
 def test_filter_dataframe_by_source_scope_supports_real_and_synthetic_modes() -> None:
     df = pd.DataFrame(
         [
@@ -143,6 +236,66 @@ def test_build_resolution_metrics_counts_expected_values() -> None:
     assert metrics["entities_merged"] == 1
     assert metrics["review_candidates"] == 1
     assert metrics["cross_source_canonical_entities"] == 1
+
+
+def test_build_resolution_metrics_handles_missing_decision_column() -> None:
+    metrics = build_resolution_metrics(
+        pd.DataFrame([{"entity_id": "a"}]),
+        pd.DataFrame([{"canonical_entity_id": "c1", "source_name": "synthetic"}]),
+        pd.DataFrame([{"match_id": "m1"}]),
+    )
+
+    assert metrics["review_candidates"] == 0
+
+
+def test_build_dashboard_metrics_handles_missing_entity_risk_level_column() -> None:
+    metrics = build_dashboard_metrics(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame([{"entity_id": "e1"}]),
+        pd.DataFrame(),
+    )
+
+    assert metrics["high_risk_entities"] == 0
+    assert metrics["medium_risk_entities"] == 0
+
+
+def test_build_dashboard_metrics_does_not_treat_anomaly_report_as_lead_metrics() -> None:
+    anomaly_report_df = pd.DataFrame(
+        [
+            {"Risk Score": 30, "Rule Triggered": "Shared Address"},
+            {"Risk Score": 20, "Rule Triggered": "Shared Phone"},
+        ]
+    )
+    prioritized_leads_df = pd.DataFrame(
+        [
+            {"priority": "CRITICAL", "confidence": "VERY HIGH", "independent_source_count": 2},
+            {"priority": "HIGH", "confidence": "HIGH", "cross_source_match_count": 0},
+        ]
+    )
+
+    report_metrics = build_dashboard_metrics(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        anomaly_report_df,
+    )
+    lead_metrics = build_dashboard_metrics(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        prioritized_leads_df,
+    )
+
+    assert report_metrics["critical_leads"] == 0
+    assert report_metrics["high_priority_leads"] == 0
+    assert report_metrics["high_confidence_leads"] == 0
+    assert lead_metrics["critical_leads"] == 1
+    assert lead_metrics["high_priority_leads"] == 2
+    assert lead_metrics["high_confidence_leads"] == 2
 
 
 def test_load_cross_source_matches_adds_source_scope_columns(tmp_path: Path) -> None:
