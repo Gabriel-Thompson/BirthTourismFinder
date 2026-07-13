@@ -170,7 +170,7 @@ class SharedAddressBusinessesMarker(BaseMarker):
         records: List[FraudMarkerRecord] = []
         address_groups: dict[str, list[dict[str, object]]] = defaultdict(list)
         for row in context.relationships_df.to_dict("records"):
-            if str(row.get("relationship_type", "")) != "LOCATED_AT":
+            if str(row.get("relationship_type", "")) not in {"LOCATED_AT", "BUSINESS_LOCATED_AT"}:
                 continue
             source = entity_row(context, str(row.get("source_entity_id", "")))
             target = entity_row(context, str(row.get("target_entity_id", "")))
@@ -282,6 +282,48 @@ class MailingAddressReuseMarker(BaseMarker):
         return records
 
 
+@register_marker("business_mailing_address_cluster")
+class BusinessMailingAddressClusterMarker(BaseMarker):
+    marker_id = "business_mailing_address_cluster"
+    marker_name = "Many Companies Sharing One Mailing Address"
+    category = "address"
+
+    def evaluate(self, context: MarkerContext) -> List[FraudMarkerRecord]:
+        records: List[FraudMarkerRecord] = []
+        groups: dict[str, list[dict[str, object]]] = defaultdict(list)
+        for row in context.relationships_df.to_dict("records"):
+            if str(row.get("relationship_type", "")) != "BUSINESS_MAILING_ADDRESS":
+                continue
+            source = entity_row(context, str(row.get("source_entity_id", "")))
+            target = entity_row(context, str(row.get("target_entity_id", "")))
+            if source.get("entity_type") == "business" and target.get("entity_type") == "address":
+                groups[str(row["target_entity_id"])].append(row)
+
+        for address_id, rows in groups.items():
+            business_ids = sorted({str(row["source_entity_id"]) for row in rows})
+            if len(business_ids) < self.minimum_support:
+                continue
+            address_name = str(entity_row(context, address_id).get("display_name", address_id))
+            rel_ids = [str(row.get("relationship_id", "")) for row in rows]
+            for business_id in business_ids:
+                rec = marker_record(
+                    self,
+                    context,
+                    entity_id=business_id,
+                    support=len(business_ids),
+                    confidence_score=min(0.62 + 0.06 * len(business_ids), 0.94),
+                    sources=[entity_row(context, bid).get("source_name", "") for bid in business_ids],
+                    source_types=[entity_row(context, bid).get("source_type", "") for bid in business_ids],
+                    supporting_entities=[address_id, *business_ids],
+                    supporting_relationships=rel_ids,
+                    recommended_review="Review whether the shared mailing address is a legitimate centralized office, agent service, or a potentially high-volume filing point.",
+                    explanation=f"{len(business_ids)} businesses reuse mailing address {address_name}.",
+                )
+                if rec is not None:
+                    records.append(rec)
+        return records
+
+
 class _SharedIdentifierMarker(BaseMarker):
     relationship_type = ""
     target_type = ""
@@ -365,7 +407,7 @@ class SimilarBusinessNamesMarker(BaseMarker):
         records: List[FraudMarkerRecord] = []
         address_to_businesses: dict[str, list[str]] = defaultdict(list)
         for row in context.relationships_df.to_dict("records"):
-            if str(row.get("relationship_type", "")) != "LOCATED_AT":
+            if str(row.get("relationship_type", "")) not in {"LOCATED_AT", "BUSINESS_LOCATED_AT"}:
                 continue
             source = entity_row(context, str(row.get("source_entity_id", "")))
             target = entity_row(context, str(row.get("target_entity_id", "")))
@@ -491,6 +533,75 @@ class CountyClerkPartyAppearsInBusinessRecordsMarker(BaseMarker):
                 supporting_relationships=[],
                 recommended_review="Review whether the public court party also appears in business-registration or ownership records.",
                 explanation=f"County clerk entity {clerk.get('display_name', clerk['entity_id'])} matches {len(matches)} business-related records across other sources.",
+            )
+            if rec is not None:
+                records.append(rec)
+        return records
+
+
+@register_marker("officer_controls_many_businesses")
+class OfficerControlsManyBusinessesMarker(BaseMarker):
+    marker_id = "officer_controls_many_businesses"
+    marker_name = "One Officer Controlling Many Businesses"
+    category = "control"
+
+    def evaluate(self, context: MarkerContext) -> List[FraudMarkerRecord]:
+        records: List[FraudMarkerRecord] = []
+        for entity_id, rels in context.outgoing.items():
+            entity = entity_row(context, entity_id)
+            if str(entity.get("entity_type", "")) != "officer":
+                continue
+            controlled = [row for row in rels if str(row.get("relationship_type", "")) == "OFFICER_OF"]
+            business_ids = sorted({str(row.get("target_entity_id", "")) for row in controlled if str(row.get("target_entity_id", "")).strip()})
+            if len(business_ids) < self.minimum_support:
+                continue
+            rec = marker_record(
+                self,
+                context,
+                entity_id=entity_id,
+                support=len(business_ids),
+                confidence_score=min(0.68 + 0.04 * len(business_ids), 0.96),
+                sources=[str(entity.get("source_name", "")), *[str(entity_row(context, bid).get("source_name", "")) for bid in business_ids]],
+                source_types=[str(entity.get("source_type", "")), *[str(entity_row(context, bid).get("source_type", "")) for bid in business_ids]],
+                supporting_entities=[entity_id, *business_ids],
+                supporting_relationships=[str(row.get("relationship_id", "")) for row in controlled],
+                recommended_review="Review whether the officer's business-control pattern is expected for the industry, family office, or a denser shell-company style network.",
+                explanation=f"Officer {entity.get('display_name', entity_id)} is linked as an officer to {len(business_ids)} businesses.",
+            )
+            if rec is not None:
+                records.append(rec)
+        return records
+
+
+@register_marker("registered_agent_dense_network")
+class RegisteredAgentDenseNetworkMarker(BaseMarker):
+    marker_id = "registered_agent_dense_network"
+    marker_name = "One Registered Agent Connected to Unusually Dense Networks"
+    category = "network"
+
+    def evaluate(self, context: MarkerContext) -> List[FraudMarkerRecord]:
+        records: List[FraudMarkerRecord] = []
+        for entity_id, rels in context.outgoing.items():
+            entity = entity_row(context, entity_id)
+            if str(entity.get("entity_type", "")) != "registered_agent":
+                continue
+            business_links = [row for row in rels if str(row.get("relationship_type", "")) == "REGISTERED_AGENT_FOR"]
+            address_links = [row for row in rels if str(row.get("relationship_type", "")) == "REGISTERED_AGENT_AT_ADDRESS"]
+            support = len({str(row.get("target_entity_id", "")) for row in business_links if str(row.get("target_entity_id", "")).strip()})
+            if support < self.minimum_support:
+                continue
+            rec = marker_record(
+                self,
+                context,
+                entity_id=entity_id,
+                support=support,
+                confidence_score=min(0.66 + 0.05 * support + 0.02 * len(address_links), 0.97),
+                sources=[str(entity.get("source_name", "")), *[str(entity_row(context, str(row.get("target_entity_id", ""))).get("source_name", "")) for row in business_links]],
+                source_types=[str(entity.get("source_type", "")), *[str(entity_row(context, str(row.get("target_entity_id", ""))).get("source_type", "")) for row in business_links]],
+                supporting_entities=[entity_id, *[str(row.get("target_entity_id", "")) for row in business_links], *[str(row.get("target_entity_id", "")) for row in address_links]],
+                supporting_relationships=[str(row.get("relationship_id", "")) for row in [*business_links, *address_links]],
+                recommended_review="Review whether the registered agent is serving a normal commercial volume or acting as a central node across a dense filing network.",
+                explanation=f"Registered agent {entity.get('display_name', entity_id)} is connected to {support} businesses and {len(address_links)} tracked addresses.",
             )
             if rec is not None:
                 records.append(rec)

@@ -9,23 +9,31 @@ OpenFraud is a local-first public-record fraud-marker discovery MVP. It uses Duc
    ```bash
    pip install -r requirements.txt
    ```
-3. Run the local pipeline:
+3. For Sunbiz Daily imports, copy `.env.example` to `.env` and set:
+   ```bash
+   SUNBIZ_DAILY_API_KEY=your-local-api-key
+   ```
+4. Run the local pipeline:
    ```bash
    python src/run_pipeline.py
    ```
-4. Run the statistical risk engine directly when you want to refresh baselines and rarity outputs only:
+5. Run the statistical risk engine directly when you want to refresh baselines and rarity outputs only:
    ```bash
    python -m src.analytics.statistical_risk.engine
    ```
-4. Run the full local pipeline with connectors and health check:
+6. Run the full local pipeline with connectors and health check:
    ```bash
    python src/run_pipeline.py --include-connectors --health-check
    ```
-5. Reset generated artifacts and rebuild from scratch when needed:
+7. To include the authenticated Sunbiz Daily API import, run:
+   ```bash
+   python src/run_pipeline.py --include-sunbiz --include-connectors --health-check
+   ```
+8. Reset generated artifacts and rebuild from scratch when needed:
    ```bash
    python src/run_pipeline.py --reset --clear-lead-packages --include-connectors --health-check
    ```
-6. Launch the dashboard:
+9. Launch the dashboard:
    ```bash
    streamlit run src/app/dashboard.py
    ```
@@ -77,6 +85,14 @@ Local file connectors:
 python src/connectors/sunbiz/local_file_connector.py
 python src/connectors/county_property/local_file_connector.py
 python src/connectors/county_clerk/local_file_connector.py
+```
+
+Sunbiz Daily:
+```bash
+python src/connectors/sunbiz_daily_connector.py
+python src/connectors/sunbiz_daily_connector.py --county Hillsborough --limit 100
+python src/connectors/sunbiz_daily_connector.py --county Hillsborough --city Tampa --zip 33602 --from-date 2026-07-01 --to-date 2026-07-10 --limit 100
+python src/run_pipeline.py --include-sunbiz --include-connectors --health-check
 ```
 
 Reporting and validation:
@@ -156,6 +172,16 @@ The Analyst Workbench includes:
 - `Entity Explorer`
 - `Reports`
 - `Source Health`
+
+The `Source Health` page includes a `Sunbiz Daily` section that shows:
+- businesses imported
+- officers imported
+- registered agents
+- addresses
+- cross-source matches
+- API status
+- last import
+- county coverage
 
 Local workstation features:
 - persisted analyst notes, reviewer, disposition, bookmark, follow-up, and priority override in `data/processed/analyst_lead_state.csv`
@@ -669,6 +695,28 @@ python src/connectors/sunbiz/local_file_connector.py --input data/raw/sunbiz/sam
 python src/connectors/county_property/local_file_connector.py --input data/raw/county_property/sample_property_records.csv
 python src/connectors/county_clerk/local_file_connector.py --input data/raw/county_clerk/sample_clerk_records.csv
 ```
+
+## Sunbiz Daily Integration
+
+Use the authenticated Sunbiz Daily API as the primary corporate-record source when live API access is available.
+
+Setup:
+- obtain a Sunbiz Daily API key through your Sunbiz Daily account or account-admin workflow
+- place `SUNBIZ_DAILY_API_KEY` in a local `.env`
+- keep `.env` out of version control
+- review `config/sunbiz_daily.json` before changing county, city, ZIP, date-range, or entity-type filters
+
+Behavior:
+- the connector is local-first and writes only local CSV/JSON artifacts
+- it preserves source provenance on every entity and relationship
+- it does not fetch document images
+- it does not scrape any websites
+- it respects bounded pagination, retries, timeouts, and rate limiting
+
+Limitations:
+- the connector only ingests filing metadata and linked parties/addresses
+- all results remain investigative leads only, not proof of fraud
+- API access depends on the configured key and official account access
 
 ## Phase 3 Note
 

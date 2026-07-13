@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -26,6 +27,7 @@ from src.connectors.county_property.local_file_connector import DEFAULT_COUNTY_P
 from src.connectors.open_data_api import DEFAULT_ENTITIES_PATH as DEFAULT_API_ENTITIES_PATH
 from src.connectors.open_data_api import DEFAULT_RELATIONSHIPS_PATH as DEFAULT_API_RELATIONSHIPS_PATH
 from src.connectors.source_manifest import ensure_local_only_path, validate_source
+from src.connectors.sunbiz_daily_connector import DEFAULT_STATUS_PATH as DEFAULT_SUNBIZ_DAILY_STATUS_PATH
 from src.connectors.sunbiz.local_file_connector import DEFAULT_SUNBIZ_INPUT_PATH
 from src.health_check import check_project_health
 from src.ingest.generate_synthetic_data import generate_synthetic_dataset
@@ -67,6 +69,8 @@ DEFAULT_LEAD_EVIDENCE_INDEX_PATH = DEFAULT_PROCESSED_DIR / "lead_evidence_index.
 DEFAULT_REVIEW_RECOMMENDATIONS_PATH = DEFAULT_PROCESSED_DIR / "review_recommendations.csv"
 DEFAULT_SUNBIZ_ENTITIES_PATH = DEFAULT_PROCESSED_DIR / "sunbiz_entities.csv"
 DEFAULT_SUNBIZ_RELATIONSHIPS_PATH = DEFAULT_PROCESSED_DIR / "sunbiz_relationships.csv"
+DEFAULT_SUNBIZ_DAILY_STATUS_JSON_PATH = DEFAULT_PROCESSED_DIR / "sunbiz_daily_status.json"
+DEFAULT_SUNBIZ_DAILY_SOURCE_NAME = "sunbiz_daily_api"
 DEFAULT_COUNTY_CLERK_ENTITIES_PATH = DEFAULT_PROCESSED_DIR / "county_clerk_entities.csv"
 DEFAULT_COUNTY_CLERK_RELATIONSHIPS_PATH = DEFAULT_PROCESSED_DIR / "county_clerk_relationships.csv"
 DEFAULT_COUNTY_PROPERTY_ENTITIES_PATH = DEFAULT_PROCESSED_DIR / "county_property_entities.csv"
@@ -153,12 +157,13 @@ def run_pipeline(
     anomaly_path: Optional[Path | str] = None,
     entity_risk_path: Optional[Path | str] = None,
     include_connectors: bool = False,
+    include_sunbiz: bool = False,
     run_health_check: bool = False,
     reset: bool = False,
     clear_lead_packages_flag: bool = False,
 ) -> None:
     pipeline_start = time.time()
-    total_steps = 11 + (1 if include_connectors else 0) + (1 if run_health_check else 0) + (1 if reset else 0) + (1 if clear_lead_packages_flag else 0)
+    total_steps = 11 + (1 if include_connectors or include_sunbiz else 0) + (1 if run_health_check else 0) + (1 if reset else 0) + (1 if clear_lead_packages_flag else 0)
     source_path = Path(source_dir or DEFAULT_SOURCE_DIR)
     db_path = Path(output_db or DEFAULT_OUTPUT_DB)
     processed_path = Path(processed_dir or DEFAULT_PROCESSED_DIR)
@@ -184,6 +189,7 @@ def run_pipeline(
     print(f"Pipeline: output DuckDB {db_path}")
     print(f"Pipeline: processed dir {processed_path}")
     print(f"Pipeline: include_connectors={include_connectors}")
+    print(f"Pipeline: include_sunbiz={include_sunbiz}")
     print(f"Pipeline: run_health_check={run_health_check}")
     print(f"Pipeline: reset={reset}")
     print(f"Pipeline: clear_lead_packages={clear_lead_packages_flag}")
@@ -236,46 +242,81 @@ def run_pipeline(
 
     connector_entity_paths: list[Path] = []
     connector_relationship_paths: list[Path] = []
-    if include_connectors:
-        print(f"Step {current_step}/{total_steps}: Ingest local connector data")
+    if include_connectors or include_sunbiz:
+        print(f"Step {current_step}/{total_steps}: Ingest connector data")
         connector_input_root = source_path.parents[0]
-        sunbiz_input_path = connector_input_root / DEFAULT_SUNBIZ_INPUT_PATH.relative_to("data/raw")
-        if sunbiz_input_path.exists():
-            validate_source("sunbiz_local_file")
-            ensure_local_only_path("sunbiz_local_file", sunbiz_input_path)
-            print(f"  Found Sunbiz connector input at {sunbiz_input_path}")
-            sunbiz_entities_path = processed_path / "sunbiz_entities.csv"
-            sunbiz_relationships_path = processed_path / "sunbiz_relationships.csv"
-            processed_path.mkdir(parents=True, exist_ok=True)
-            connector_script = Path(__file__).resolve().parents[0] / "connectors" / "sunbiz" / "local_file_connector.py"
-            subprocess.run(
-                [
-                    sys.executable,
-                    str(connector_script),
-                    "--input",
-                    str(sunbiz_input_path),
-                    "--entities-path",
-                    str(sunbiz_entities_path),
-                    "--relationships-path",
-                    str(sunbiz_relationships_path),
-                ],
-                check=True,
-            )
-            print(f"  Wrote sunbiz entities to {sunbiz_entities_path}")
-            print(f"  Wrote sunbiz relationships to {sunbiz_relationships_path}")
-            connector_entity_paths.append(sunbiz_entities_path)
-            connector_relationship_paths.append(sunbiz_relationships_path)
-        else:
-            print(
-                "  No default Sunbiz connector input found at "
-                f"{sunbiz_input_path}. Manually place a file at "
-                "data/raw/sunbiz/sunbiz_entities.csv to include Sunbiz data in the "
-                "pipeline. Sample input is supported only when you run the connector "
-                "explicitly with --input."
-            )
+        sunbiz_entities_path = processed_path / "sunbiz_entities.csv"
+        sunbiz_relationships_path = processed_path / "sunbiz_relationships.csv"
+
+        if include_sunbiz:
+            try:
+                validate_source(DEFAULT_SUNBIZ_DAILY_SOURCE_NAME, require_live_access=True)
+                connector_script = Path(__file__).resolve().parents[0] / "connectors" / "sunbiz_daily_connector.py"
+                print(f"  Running Sunbiz Daily API import for source {DEFAULT_SUNBIZ_DAILY_SOURCE_NAME}")
+                subprocess.run(
+                    [
+                        sys.executable,
+                        str(connector_script),
+                        "--county",
+                        "Hillsborough",
+                        "--limit",
+                        "100",
+                        "--entities-path",
+                        str(sunbiz_entities_path),
+                        "--relationships-path",
+                        str(sunbiz_relationships_path),
+                        "--status-path",
+                        str(processed_path / DEFAULT_SUNBIZ_DAILY_STATUS_PATH.name),
+                        "--db-path",
+                        str(db_path),
+                        "--skip-cross-source-refresh",
+                    ],
+                    check=True,
+                )
+                print(f"  Wrote Sunbiz Daily entities to {sunbiz_entities_path}")
+                print(f"  Wrote Sunbiz Daily relationships to {sunbiz_relationships_path}")
+                connector_entity_paths.append(sunbiz_entities_path)
+                connector_relationship_paths.append(sunbiz_relationships_path)
+            except subprocess.CalledProcessError as exc:
+                print(f"  Skipping Sunbiz Daily connector {DEFAULT_SUNBIZ_DAILY_SOURCE_NAME}: connector execution failed ({exc.returncode}).")
+            except ValueError as exc:
+                print(f"  Skipping Sunbiz Daily connector {DEFAULT_SUNBIZ_DAILY_SOURCE_NAME}: {exc}")
+        elif include_connectors:
+            sunbiz_input_path = connector_input_root / DEFAULT_SUNBIZ_INPUT_PATH.relative_to("data/raw")
+            if sunbiz_input_path.exists():
+                validate_source("sunbiz_local_file")
+                ensure_local_only_path("sunbiz_local_file", sunbiz_input_path)
+                print(f"  Found Sunbiz connector input at {sunbiz_input_path}")
+                processed_path.mkdir(parents=True, exist_ok=True)
+                connector_script = Path(__file__).resolve().parents[0] / "connectors" / "sunbiz" / "local_file_connector.py"
+                subprocess.run(
+                    [
+                        sys.executable,
+                        str(connector_script),
+                        "--input",
+                        str(sunbiz_input_path),
+                        "--entities-path",
+                        str(sunbiz_entities_path),
+                        "--relationships-path",
+                        str(sunbiz_relationships_path),
+                    ],
+                    check=True,
+                )
+                print(f"  Wrote sunbiz entities to {sunbiz_entities_path}")
+                print(f"  Wrote sunbiz relationships to {sunbiz_relationships_path}")
+                connector_entity_paths.append(sunbiz_entities_path)
+                connector_relationship_paths.append(sunbiz_relationships_path)
+            else:
+                print(
+                    "  No default Sunbiz connector input found at "
+                    f"{sunbiz_input_path}. Manually place a file at "
+                    "data/raw/sunbiz/sunbiz_entities.csv to include Sunbiz data in the "
+                    "pipeline. Sample input is supported only when you run the connector "
+                    "explicitly with --input."
+                )
 
         county_property_input_path = connector_input_root / DEFAULT_COUNTY_PROPERTY_INPUT_PATH.relative_to("data/raw")
-        if county_property_input_path.exists():
+        if include_connectors and county_property_input_path.exists():
             validate_source("county_property_local_file")
             ensure_local_only_path("county_property_local_file", county_property_input_path)
             print(f"  Found county property connector input at {county_property_input_path}")
@@ -299,7 +340,7 @@ def run_pipeline(
             print(f"  Wrote county property relationships to {county_property_relationships_path}")
             connector_entity_paths.append(county_property_entities_path)
             connector_relationship_paths.append(county_property_relationships_path)
-        else:
+        elif include_connectors:
             print(
                 "  No default county property connector input found at "
                 f"{county_property_input_path}. Manually place a file at "
@@ -309,7 +350,7 @@ def run_pipeline(
             )
 
         county_clerk_input_path = connector_input_root / DEFAULT_COUNTY_CLERK_INPUT_PATH.relative_to("data/raw")
-        if county_clerk_input_path.exists():
+        if include_connectors and county_clerk_input_path.exists():
             validate_source("county_clerk_local_file")
             ensure_local_only_path("county_clerk_local_file", county_clerk_input_path)
             print(f"  Found county clerk connector input at {county_clerk_input_path}")
@@ -333,7 +374,7 @@ def run_pipeline(
             print(f"  Wrote county clerk relationships to {county_clerk_relationships_path}")
             connector_entity_paths.append(county_clerk_entities_path)
             connector_relationship_paths.append(county_clerk_relationships_path)
-        else:
+        elif include_connectors:
             print(
                 "  No default county clerk connector input found at "
                 f"{county_clerk_input_path}. Manually place a file at "
@@ -342,64 +383,65 @@ def run_pipeline(
                 "the connector explicitly with --input."
             )
 
-        try:
-            validate_source(DEFAULT_API_SOURCE_NAME, require_live_access=True)
-            api_entities_path = processed_path / DEFAULT_API_ENTITIES_PATH.name
-            api_relationships_path = processed_path / DEFAULT_API_RELATIONSHIPS_PATH.name
-            connector_script = Path(__file__).resolve().parents[0] / "connectors" / "open_data_api.py"
+        if include_connectors:
             try:
-                subprocess.run(
-                    [
-                        sys.executable,
-                        str(connector_script),
-                        "--source",
-                        DEFAULT_API_SOURCE_NAME,
-                        "--entities-path",
-                        str(api_entities_path),
-                        "--relationships-path",
-                        str(api_relationships_path),
-                    ],
-                    check=True,
-                )
-                print(f"  Wrote api entities to {api_entities_path}")
-                print(f"  Wrote api relationships to {api_relationships_path}")
-                connector_entity_paths.append(api_entities_path)
-                connector_relationship_paths.append(api_relationships_path)
-            except subprocess.CalledProcessError as exc:
-                print(f"  Skipping API connector {DEFAULT_API_SOURCE_NAME}: connector execution failed ({exc.returncode}).")
-        except ValueError as exc:
-            print(f"  Skipping API connector {DEFAULT_API_SOURCE_NAME}: {exc}")
+                validate_source(DEFAULT_API_SOURCE_NAME, require_live_access=True)
+                api_entities_path = processed_path / DEFAULT_API_ENTITIES_PATH.name
+                api_relationships_path = processed_path / DEFAULT_API_RELATIONSHIPS_PATH.name
+                connector_script = Path(__file__).resolve().parents[0] / "connectors" / "open_data_api.py"
+                try:
+                    subprocess.run(
+                        [
+                            sys.executable,
+                            str(connector_script),
+                            "--source",
+                            DEFAULT_API_SOURCE_NAME,
+                            "--entities-path",
+                            str(api_entities_path),
+                            "--relationships-path",
+                            str(api_relationships_path),
+                        ],
+                        check=True,
+                    )
+                    print(f"  Wrote api entities to {api_entities_path}")
+                    print(f"  Wrote api relationships to {api_relationships_path}")
+                    connector_entity_paths.append(api_entities_path)
+                    connector_relationship_paths.append(api_relationships_path)
+                except subprocess.CalledProcessError as exc:
+                    print(f"  Skipping API connector {DEFAULT_API_SOURCE_NAME}: connector execution failed ({exc.returncode}).")
+            except ValueError as exc:
+                print(f"  Skipping API connector {DEFAULT_API_SOURCE_NAME}: {exc}")
 
-        try:
-            validate_source(DEFAULT_ARCGIS_SOURCE_NAME, require_live_access=True)
-            arcgis_entities_path = processed_path / DEFAULT_ARCGIS_ENTITIES_PATH.name
-            arcgis_relationships_path = processed_path / DEFAULT_ARCGIS_RELATIONSHIPS_PATH.name
-            connector_script = Path(__file__).resolve().parents[0] / "connectors" / "arcgis" / "arcgis_connector.py"
             try:
-                subprocess.run(
-                    [
-                        sys.executable,
-                        str(connector_script),
-                        "--source",
-                        DEFAULT_ARCGIS_SOURCE_NAME,
-                        "--entities-path",
-                        str(arcgis_entities_path),
-                        "--relationships-path",
-                        str(arcgis_relationships_path),
-                    ],
-                    check=True,
-                )
-                print(f"  Wrote arcgis entities to {arcgis_entities_path}")
-                print(f"  Wrote arcgis relationships to {arcgis_relationships_path}")
-                connector_entity_paths.append(arcgis_entities_path)
-                connector_relationship_paths.append(arcgis_relationships_path)
-            except subprocess.CalledProcessError as exc:
-                print(
-                    f"  Skipping ArcGIS connector {DEFAULT_ARCGIS_SOURCE_NAME}: "
-                    f"connector execution failed ({exc.returncode})."
-                )
-        except ValueError as exc:
-            print(f"  Skipping ArcGIS connector {DEFAULT_ARCGIS_SOURCE_NAME}: {exc}")
+                validate_source(DEFAULT_ARCGIS_SOURCE_NAME, require_live_access=True)
+                arcgis_entities_path = processed_path / DEFAULT_ARCGIS_ENTITIES_PATH.name
+                arcgis_relationships_path = processed_path / DEFAULT_ARCGIS_RELATIONSHIPS_PATH.name
+                connector_script = Path(__file__).resolve().parents[0] / "connectors" / "arcgis" / "arcgis_connector.py"
+                try:
+                    subprocess.run(
+                        [
+                            sys.executable,
+                            str(connector_script),
+                            "--source",
+                            DEFAULT_ARCGIS_SOURCE_NAME,
+                            "--entities-path",
+                            str(arcgis_entities_path),
+                            "--relationships-path",
+                            str(arcgis_relationships_path),
+                        ],
+                        check=True,
+                    )
+                    print(f"  Wrote arcgis entities to {arcgis_entities_path}")
+                    print(f"  Wrote arcgis relationships to {arcgis_relationships_path}")
+                    connector_entity_paths.append(arcgis_entities_path)
+                    connector_relationship_paths.append(arcgis_relationships_path)
+                except subprocess.CalledProcessError as exc:
+                    print(
+                        f"  Skipping ArcGIS connector {DEFAULT_ARCGIS_SOURCE_NAME}: "
+                        f"connector execution failed ({exc.returncode})."
+                    )
+            except ValueError as exc:
+                print(f"  Skipping ArcGIS connector {DEFAULT_ARCGIS_SOURCE_NAME}: {exc}")
         current_step += 1
 
     print(f"Step {current_step}/{total_steps}: Build entities and relationships")
@@ -459,6 +501,18 @@ def run_pipeline(
         f"review={cross_source_summary['review_match_count']} "
         f"rejected={cross_source_summary['rejected_match_count']}"
     )
+    if include_sunbiz:
+        status_path = processed_path / DEFAULT_SUNBIZ_DAILY_STATUS_JSON_PATH.name
+        if status_path.exists() and status_path.stat().st_size > 0:
+            try:
+                with status_path.open("r", encoding="utf-8") as handle:
+                    status_payload = json.load(handle)
+                if isinstance(status_payload, dict):
+                    status_payload["cross_source_matches"] = int(cross_source_summary.get("cross_source_match_count", 0))
+                    with status_path.open("w", encoding="utf-8") as handle:
+                        json.dump(status_payload, handle, indent=2)
+            except Exception:
+                pass
     current_step += 1
 
     print(f"Step {current_step}/{total_steps}: Calculate statistical baselines and rarity")
@@ -601,6 +655,11 @@ def main() -> None:
         help="Include local connector outputs such as Sunbiz in the merged entity/relationship build",
     )
     parser.add_argument(
+        "--include-sunbiz",
+        action="store_true",
+        help="Run the authenticated Sunbiz Daily API connector and merge its outputs into the local pipeline.",
+    )
+    parser.add_argument(
         "--health-check",
         action="store_true",
         help="Run project health check after the pipeline completes",
@@ -628,6 +687,7 @@ def main() -> None:
             anomaly_path=args.anomaly_path,
             entity_risk_path=args.entity_risk_path,
             include_connectors=args.include_connectors,
+            include_sunbiz=args.include_sunbiz,
             run_health_check=args.health_check,
             reset=args.reset,
             clear_lead_packages_flag=args.clear_lead_packages,

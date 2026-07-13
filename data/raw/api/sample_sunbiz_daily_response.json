@@ -1,0 +1,55 @@
+{
+  "results": [
+    {
+      "document_number": "L26000010001",
+      "business_name": "HILLSBOROUGH HOLDINGS LLC",
+      "entity_type": "LLC",
+      "status": "ACTIVE",
+      "filing_date": "2026-07-01",
+      "principal_address": "100 Commerce Blvd, Tampa, FL 33602",
+      "mailing_address": "PO Box 500, Tampa, FL 33601",
+      "registered_agent": {
+        "name": "JANE AGENT",
+        "address": "100 Commerce Blvd, Tampa, FL 33602"
+      },
+      "officers": [
+        {
+          "name": "ROBERT OWNER",
+          "address": "100 Commerce Blvd, Tampa, FL 33602"
+        },
+        {
+          "name": "ALICIA MANAGER",
+          "address": "PO Box 500, Tampa, FL 33601"
+        }
+      ],
+      "county": "Hillsborough",
+      "city": "Tampa",
+      "zip": "33602"
+    },
+    {
+      "document_number": "P26000020002",
+      "business_name": "BAY STREET SERVICES INC",
+      "entity_type": "CORPORATION",
+      "status": "ACTIVE",
+      "filing_date": "2026-07-03",
+      "principal_address": "321 Bay St, Tampa, FL 33606",
+      "mailing_address": "321 Bay St, Tampa, FL 33606",
+      "registered_agent": {
+        "name": "JANE AGENT",
+        "address": "321 Bay St, Tampa, FL 33606"
+      },
+      "officers": [
+        {
+          "name": "ROBERT OWNER",
+          "address": "321 Bay St, Tampa, FL 33606"
+        }
+      ],
+      "county": "Hillsborough",
+      "city": "Tampa",
+      "zip": "33606"
+    }
+  ],
+  "pagination": {
+    "next_page": null
+  }
+}

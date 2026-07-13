@@ -1,0 +1,36 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "PARCEL_ID": "ARC-001",
+        "OWNER_NAME": "ArcGIS Owner LLC",
+        "SITUS_ADDRESS": "700 Map Ave, Pensacola, FL 32501",
+        "MAILING_ADDRESS": "PO Box 700, Pensacola, FL 32502",
+        "LAND_USE": "Residential",
+        "ASSESSED_VALUE": 350000,
+        "SALE_DATE": "2025-01-15",
+        "SALE_PRICE": 340000
+      },
+      "geometry": {
+        "x": -87.2169,
+        "y": 30.4213
+      }
+    },
+    {
+      "attributes": {
+        "PARCEL_ID": "ARC-002",
+        "OWNER_NAME": "Coastal Parcels Inc",
+        "SITUS_ADDRESS": "701 Map Ave, Pensacola, FL 32501",
+        "MAILING_ADDRESS": "PO Box 701, Pensacola, FL 32502",
+        "LAND_USE": "Commercial",
+        "ASSESSED_VALUE": 525000,
+        "SALE_DATE": "2024-11-01",
+        "SALE_PRICE": 500000
+      },
+      "geometry": {
+        "x": -87.2172,
+        "y": 30.4218
+      }
+    }
+  ]
+}

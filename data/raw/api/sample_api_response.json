@@ -1,0 +1,16 @@
+[
+  {
+    "id": "API-001",
+    "name": "Sample Open Data Entity",
+    "address": "500 Demo Blvd, Pensacola, FL 32501",
+    "website": "https://sample.example.org",
+    "category": "demo"
+  },
+  {
+    "id": "API-002",
+    "name": "Open Records Example",
+    "address": "501 Demo Blvd, Pensacola, FL 32501",
+    "website": "",
+    "category": "demo"
+  }
+]

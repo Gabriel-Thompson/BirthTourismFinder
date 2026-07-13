@@ -32,6 +32,13 @@
       "minimum_support": 2,
       "minimum_sources": 1
     },
+    "business_mailing_address_cluster": {
+      "enabled": true,
+      "weight": 17,
+      "minimum_confidence": 0.65,
+      "minimum_support": 2,
+      "minimum_sources": 1
+    },
     "shared_phone": {
       "enabled": true,
       "weight": 14,
@@ -73,6 +80,20 @@
       "minimum_confidence": 0.7,
       "minimum_support": 1,
       "minimum_sources": 2
+    },
+    "officer_controls_many_businesses": {
+      "enabled": true,
+      "weight": 18,
+      "minimum_confidence": 0.7,
+      "minimum_support": 3,
+      "minimum_sources": 1
+    },
+    "registered_agent_dense_network": {
+      "enabled": true,
+      "weight": 18,
+      "minimum_confidence": 0.7,
+      "minimum_support": 3,
+      "minimum_sources": 1
     },
     "cross_source_multi_source_address": {
       "enabled": true,

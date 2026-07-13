@@ -26,3 +26,26 @@
    `python src/run_pipeline.py --include-connectors`
 
 This workflow does not scrape Sunbiz, does not call live websites from the codebase, and does not add any API integration.
+
+## Sunbiz Daily API
+
+- Source name: Sunbiz Daily API
+- Source URL: Configured in `config/sunbiz_daily.json`
+- Access method: Official authenticated API
+- Terms reviewed? yes
+- Automated access allowed? yes
+- Rate limits: Governed by `config/sunbiz_daily.json` and the account/API agreement
+- Data fields expected: business filings, principal address, mailing address, registered agent, officers, entity type, status, filing date, document number
+- Privacy concerns: Public corporate records may still include personal names and mailing addresses that require careful handling and lead-only treatment
+- Recommended use: Use bounded county/date-filtered imports, preserve provenance on every entity and relationship, and correlate against local parcel and other public-source records only
+- Notes: Place `SUNBIZ_DAILY_API_KEY` in a local `.env` file. The connector stays local, does not download document images, and does not perform any web scraping.
+
+### Local Setup
+
+1. Copy `.env.example` to `.env`.
+2. Set `SUNBIZ_DAILY_API_KEY` in `.env`.
+3. Review `config/sunbiz_daily.json` and confirm the county/date/entity filters you want to use.
+4. Run a bounded import such as:
+   `python src/connectors/sunbiz_daily_connector.py --county Hillsborough --limit 100`
+5. To run the same import through the full pipeline, use:
+   `python src/run_pipeline.py --include-sunbiz --include-connectors --health-check`

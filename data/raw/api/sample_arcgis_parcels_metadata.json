@@ -1,0 +1,44 @@
+{
+  "fields": [
+    {
+      "name": "PARCEL_ID",
+      "alias": "Parcel ID",
+      "type": "esriFieldTypeString"
+    },
+    {
+      "name": "OWNER_NAME",
+      "alias": "Owner Name",
+      "type": "esriFieldTypeString"
+    },
+    {
+      "name": "SITUS_ADDRESS",
+      "alias": "Situs Address",
+      "type": "esriFieldTypeString"
+    },
+    {
+      "name": "MAILING_ADDRESS",
+      "alias": "Mailing Address",
+      "type": "esriFieldTypeString"
+    },
+    {
+      "name": "LAND_USE",
+      "alias": "Land Use",
+      "type": "esriFieldTypeString"
+    },
+    {
+      "name": "ASSESSED_VALUE",
+      "alias": "Assessed Value",
+      "type": "esriFieldTypeDouble"
+    },
+    {
+      "name": "SALE_DATE",
+      "alias": "Sale Date",
+      "type": "esriFieldTypeString"
+    },
+    {
+      "name": "SALE_PRICE",
+      "alias": "Sale Price",
+      "type": "esriFieldTypeDouble"
+    }
+  ]
+}
