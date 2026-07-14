@@ -644,8 +644,12 @@ python src/health_check.py
 The health check verifies:
 - `local_osint.duckdb`
 - processed CSV outputs
+- processed JSON outputs
 - fraud marker outputs
 - investigation engine outputs
+- duplicate entity and relationship identifiers
+- orphan relationships
+- malformed address rows
 - optional exports when present
 - required config files:
   - `config/entity_scoring.json`
@@ -656,6 +660,27 @@ The health check verifies:
   - `config/fraud_markers.json`
   - `config/network_detection.json`
   - `config/investigation_engine.json`
+  - `config/cross_source.json`
+  - `config/statistical_risk.json`
+  - `config/dashboard.json`
+  - `config/correlation_scoring.json`
+
+## Correlation Stability
+
+Phase 6.1 keeps the existing workflow intact while making correlation more scalable and reproducible:
+- shared lookup indexes live in `src/correlation/indexes.py`
+- configurable weighted scoring lives in `src/correlation/scoring.py`
+- address-only cross-source matches are downgraded or promoted through config-backed evidence weights instead of connector hardcoding
+- CSV writers emit header rows even when a stage produces zero records
+- the pipeline records runtime and resume state in:
+  - `data/processed/pipeline_profile.json`
+  - `data/processed/pipeline_resume_state.json`
+
+Use the mock-enabled verification flow when you want to validate NPPES and Sunbiz correlation locally without live API calls:
+
+```bash
+python src/run_pipeline.py --include-nppes --nppes-mock --include-sunbiz --sunbiz-mock --include-connectors --health-check
+```
 
 ## Reset and Rebuild
 

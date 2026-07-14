@@ -1,0 +1,25 @@
+{
+  "weights": {
+    "exact_address": 0.34,
+    "exact_unit": 0.12,
+    "exact_business_name": 0.18,
+    "exact_person_name": 0.16,
+    "exact_provider_identifier": 0.28,
+    "multiple_independent_sources": 0.12,
+    "address_building_only": 0.08,
+    "address_mailing_only": 0.04,
+    "address_association_bonus": 0.22,
+    "residential_parcel_bonus": 0.06,
+    "commercial_parcel_adjustment": -0.03,
+    "recent_formation_adjustment": 0.03,
+    "common_name_penalty": -0.16,
+    "po_box_penalty": -0.28,
+    "conflicting_address_penalty": -0.18,
+    "missing_evidence_penalty": -0.12
+  },
+  "thresholds": {
+    "accepted_exact": 0.9,
+    "review_strong": 0.72,
+    "review_weak": 0.45
+  }
+}

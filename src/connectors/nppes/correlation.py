@@ -9,6 +9,8 @@ from typing import Any
 import pandas as pd
 
 from src.analytics.entity_resolution.normalizers import normalize_address_value, normalize_business_name, normalize_person_name
+from src.correlation.indexes import build_entity_id_index, build_group_index, build_relationship_endpoint_index
+from src.correlation.scoring import classify_score, explain_evidence, load_scoring_config, weighted_score
 from src.normalize.address_normalizer import normalize_address
 
 OUTPUT_COLUMNS = {
@@ -132,10 +134,72 @@ def generate_nppes_correlations(
         return {"providers_processed": 0}
 
     imported_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    provider_lookup = {str(row.get("entity_id", "")): row for _, row in nppes_entities.iterrows() if str(row.get("entity_type", "")).endswith("_provider")}
-    address_lookup = {str(row.get("entity_id", "")): row for _, row in nppes_entities.iterrows() if str(row.get("entity_type", "")) == "address"}
-    sunbiz_lookup = {str(row.get("entity_id", "")): row for _, row in sunbiz_entities.iterrows()}
-    property_lookup = {str(row.get("entity_id", "")): row for _, row in county_property_entities.iterrows()}
+    scoring_config = load_scoring_config()
+    provider_lookup = {
+        key: value for key, value in build_entity_id_index(nppes_entities).items() if str(value.get("entity_type", "")).endswith("_provider")
+    }
+    address_lookup = {
+        key: value for key, value in build_entity_id_index(nppes_entities).items() if str(value.get("entity_type", "")) == "address"
+    }
+    sunbiz_lookup = build_entity_id_index(sunbiz_entities)
+    property_lookup = build_entity_id_index(county_property_entities)
+    county_property_endpoint_index = build_relationship_endpoint_index(county_property_relationships)
+    sunbiz_address_groups = build_group_index(
+        sunbiz_entities[sunbiz_entities.get("entity_type", pd.Series(dtype=str)).astype(str) == "address"] if not sunbiz_entities.empty else pd.DataFrame(),
+        field="display_name",
+    )
+    sunbiz_business_name_groups = build_group_index(
+        pd.DataFrame(
+            [
+                {
+                    **row,
+                    "normalized_business_name": normalize_business_name(str(row.get("display_name", ""))).get("normalized_value", ""),
+                }
+                for row in sunbiz_entities.fillna("").to_dict("records")
+                if str(row.get("entity_type", "")) == "business"
+            ]
+        ),
+        field="normalized_business_name",
+    )
+    sunbiz_person_name_groups = build_group_index(
+        pd.DataFrame(
+            [
+                {
+                    **row,
+                    "normalized_person_name": normalize_person_name(str(row.get("display_name", ""))).get("normalized_value", ""),
+                }
+                for row in sunbiz_entities.fillna("").to_dict("records")
+                if str(row.get("entity_type", "")) in {"officer", "registered_agent"}
+            ]
+        ),
+        field="normalized_person_name",
+    )
+    parcel_address_groups = build_group_index(
+        pd.DataFrame(
+            [
+                {
+                    **row,
+                    "normalized_parcel_address": normalize_address(str(row.get("display_name", ""))),
+                }
+                for row in county_property_entities.fillna("").to_dict("records")
+                if str(row.get("entity_type", "")) == "address"
+            ]
+        ),
+        field="normalized_parcel_address",
+    )
+    parcel_owner_name_groups = build_group_index(
+        pd.DataFrame(
+            [
+                {
+                    **row,
+                    "normalized_owner_name": normalize_person_name(str(row.get("display_name", ""))).get("normalized_value", ""),
+                }
+                for row in county_property_entities.fillna("").to_dict("records")
+                if str(row.get("entity_type", "")) == "owner"
+            ]
+        ),
+        field="normalized_owner_name",
+    )
 
     provider_address_rows = []
     for _, rel in nppes_relationships.iterrows():
@@ -165,7 +229,18 @@ def generate_nppes_correlations(
         provider_norm = _normalized_name(provider_name, organization=is_org)
         common_name = (org_name_frequency.get(provider_name, 0) if is_org else common_provider_names.get(provider_name, 0)) > 1
         address_text = str(address.get("display_name", ""))
-        for sunbiz_entity_id, sunbiz_row in sunbiz_lookup.items():
+        candidate_sunbiz_rows: list[dict[str, Any]] = []
+        candidate_sunbiz_rows.extend(sunbiz_address_groups.get(address_text, []))
+        if provider_norm:
+            candidate_sunbiz_rows.extend(
+                sunbiz_business_name_groups.get(provider_norm, []) if is_org else sunbiz_person_name_groups.get(provider_norm, [])
+            )
+        seen_sunbiz_candidate_ids: set[str] = set()
+        for sunbiz_row in candidate_sunbiz_rows:
+            sunbiz_entity_id = str(sunbiz_row.get("entity_id", ""))
+            if not sunbiz_entity_id or sunbiz_entity_id in seen_sunbiz_candidate_ids:
+                continue
+            seen_sunbiz_candidate_ids.add(sunbiz_entity_id)
             sunbiz_type = str(sunbiz_row.get("entity_type", ""))
             if sunbiz_type not in {"business", "officer", "registered_agent", "address"}:
                 continue
@@ -179,15 +254,31 @@ def generate_nppes_correlations(
             exact_name = provider_norm and provider_norm == sunbiz_norm
             exact_address = scope in {"EXACT_UNIT", "EXACT_BUILDING"} and not rel_type == "PROVIDER_MAILS_TO"
             building_only = scope in {"EXACT_BUILDING", "MAILING_ONLY"}
-            decision, confidence, explanation = _decision(
-                exact_name=exact_name,
-                exact_address=exact_address,
-                building_only=building_only,
-                common_name=common_name,
-                po_box=scope == "PO_BOX",
-                deactivated=bool(str(provider_data.get("deactivation_date", "")).strip()),
-                has_core_fields=bool(provider_name and address_text),
+            evidence_flags = {
+                "exact_business_name": exact_name and is_org,
+                "exact_person_name": exact_name and not is_org,
+                "exact_address": exact_address,
+                "exact_unit": scope == "EXACT_UNIT",
+                "address_building_only": building_only,
+                "address_mailing_only": scope == "MAILING_ONLY",
+                "address_association_bonus": exact_address and not exact_name,
+                "multiple_independent_sources": True,
+                "common_name_penalty": common_name,
+                "po_box_penalty": scope == "PO_BOX",
+                "missing_evidence_penalty": not bool(provider_name and address_text),
+            }
+            confidence = weighted_score(evidence_flags, scoring_config)
+            decision = "INSUFFICIENT_DATA" if not bool(provider_name and address_text) else classify_score(confidence, config=scoring_config)
+            explanation = explain_evidence(
+                matched=[label for label, matched in {"name": exact_name, "address": scope in {"EXACT_UNIT", "EXACT_BUILDING", "MAILING_ONLY"}}.items() if matched],
+                reduced_confidence=[label for label, matched in {"common_name": common_name, "po_box": scope == "PO_BOX", "building_only": building_only and not exact_address}.items() if matched],
+                missing=[label for label, missing in {"provider_name": not provider_name, "address": not address_text}.items() if missing],
+                next_step="Verify organization/person identity and exact address context before treating this as a lead.",
             )
+            if scope == "PO_BOX":
+                decision = "REJECTED"
+            if bool(str(provider_data.get("deactivation_date", "")).strip()) and decision == "ACCEPTED_EXACT":
+                decision = "REVIEW_STRONG"
             if decision == "REJECTED" and not exact_name and scope == "INCOMPLETE":
                 continue
             match_type = {
@@ -227,7 +318,24 @@ def generate_nppes_correlations(
                     "imported_at": imported_at,
                 }
             )
-        for _, property_rel in county_property_relationships.iterrows():
+        candidate_property_rels: list[dict[str, Any]] = []
+        for address_entity in parcel_address_groups.get(address_text, []):
+            address_entity_id = str(address_entity.get("entity_id", ""))
+            if not address_entity_id:
+                continue
+            candidate_property_rels.extend(county_property_endpoint_index.get(address_entity_id, []))
+        if provider_norm:
+            for owner_entity in parcel_owner_name_groups.get(provider_norm, []):
+                owner_entity_id = str(owner_entity.get("entity_id", ""))
+                if not owner_entity_id:
+                    continue
+                candidate_property_rels.extend(county_property_endpoint_index.get(owner_entity_id, []))
+        seen_property_rel_ids: set[str] = set()
+        for property_rel in candidate_property_rels:
+            relationship_id = str(property_rel.get("relationship_id", ""))
+            if relationship_id and relationship_id in seen_property_rel_ids:
+                continue
+            seen_property_rel_ids.add(relationship_id)
             property_type = str(property_rel.get("relationship_type", ""))
             if property_type not in {"PROPERTY_HAS_SITUS_ADDRESS", "PROPERTY_HAS_MAILING_ADDRESS", "PROPERTY_OWNED_BY"}:
                 continue
@@ -237,14 +345,22 @@ def generate_nppes_correlations(
                 owner_name = str(property_lookup.get(str(property_rel.get("target_entity_id", "")), {}).get("display_name", property_rel.get("target_entity_id", "")))
                 exact_name = provider_norm and provider_norm == _normalized_name(owner_name, organization=False)
                 scope = "INCOMPLETE"
-                decision, confidence, explanation = _decision(
-                    exact_name=exact_name,
-                    exact_address=False,
-                    building_only=False,
-                    common_name=common_name,
-                    po_box=False,
-                    deactivated=bool(str(provider_data.get("deactivation_date", "")).strip()),
-                    has_core_fields=bool(provider_name),
+                confidence = weighted_score(
+                    {
+                        "exact_person_name": exact_name and not is_org,
+                        "exact_business_name": exact_name and is_org,
+                        "multiple_independent_sources": True,
+                        "common_name_penalty": common_name,
+                        "missing_evidence_penalty": not bool(provider_name),
+                    },
+                    scoring_config,
+                )
+                decision = "INSUFFICIENT_DATA" if not provider_name else classify_score(confidence, config=scoring_config)
+                explanation = explain_evidence(
+                    matched=["owner_name"] if exact_name else [],
+                    reduced_confidence=["common_name"] if common_name else [],
+                    missing=["provider_name"] if not provider_name else [],
+                    next_step="Confirm that the parcel-owner relationship is supported by address or role corroboration.",
                 )
                 if not exact_name:
                     continue
@@ -280,14 +396,25 @@ def generate_nppes_correlations(
             address_entity = property_lookup.get(str(property_rel.get("target_entity_id", "")), {})
             parcel_address = str(address_entity.get("display_name", ""))
             scope = _address_scope(address_text, parcel_address, mailing=property_type == "PROPERTY_HAS_MAILING_ADDRESS")
-            decision, confidence, explanation = _decision(
-                exact_name=False,
-                exact_address=scope in {"EXACT_UNIT", "EXACT_BUILDING"} and property_type == "PROPERTY_HAS_SITUS_ADDRESS",
-                building_only=scope in {"EXACT_BUILDING", "MAILING_ONLY"},
-                common_name=common_name,
-                po_box=scope == "PO_BOX",
-                deactivated=bool(str(provider_data.get("deactivation_date", "")).strip()),
-                has_core_fields=bool(address_text and parcel_address),
+            confidence = weighted_score(
+                    {
+                        "exact_address": scope in {"EXACT_UNIT", "EXACT_BUILDING"} and property_type == "PROPERTY_HAS_SITUS_ADDRESS",
+                        "exact_unit": scope == "EXACT_UNIT",
+                        "address_building_only": scope == "EXACT_BUILDING",
+                        "address_mailing_only": scope == "MAILING_ONLY",
+                        "address_association_bonus": scope in {"EXACT_UNIT", "EXACT_BUILDING"} and property_type == "PROPERTY_HAS_SITUS_ADDRESS",
+                        "multiple_independent_sources": True,
+                        "po_box_penalty": scope == "PO_BOX",
+                        "missing_evidence_penalty": not bool(address_text and parcel_address),
+                    },
+                scoring_config,
+            )
+            decision = "INSUFFICIENT_DATA" if not bool(address_text and parcel_address) else classify_score(confidence, config=scoring_config)
+            explanation = explain_evidence(
+                matched=["exact_unit_address"] if scope == "EXACT_UNIT" else ["exact_building_address"] if scope == "EXACT_BUILDING" else ["mailing_address"] if scope == "MAILING_ONLY" else [],
+                reduced_confidence=["po_box"] if scope == "PO_BOX" else ["generalized_address"] if scope == "GENERALIZED" else [],
+                missing=["provider_address", "parcel_address"] if not bool(address_text and parcel_address) else [],
+                next_step="Treat exact practice-to-situs matches as association evidence, then verify parcel context.",
             )
             if decision == "REJECTED" and scope == "INCOMPLETE":
                 continue

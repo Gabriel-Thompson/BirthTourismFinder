@@ -10,6 +10,7 @@ import duckdb
 import pandas as pd
 
 from src.connectors.source_metadata import PROVENANCE_FIELDS, apply_provenance, infer_source_metadata, merge_source_values
+from src.utils.csv_io import write_csv_rows
 
 DB_PATH = Path("local_osint.duckdb")
 ENTITIES_PATH = Path("data/processed/entities.csv")
@@ -338,8 +339,16 @@ def build_entity_graph(
                 "CREATE TABLE relationships AS SELECT CAST(NULL AS VARCHAR) AS source_entity_id, CAST(NULL AS VARCHAR) AS target_entity_id, CAST(NULL AS VARCHAR) AS relationship_type, CAST(NULL AS DOUBLE) AS confidence, CAST(NULL AS VARCHAR) AS source, CAST(NULL AS VARCHAR) AS source_name, CAST(NULL AS VARCHAR) AS source_type"
             )
 
-    write_csv(entities_output, entities)
-    write_csv(relationships_output, relationships)
+    write_csv(
+        entities_output,
+        entities,
+        fieldnames=["entity_id", "display_name", "entity_type", "source", "source_name", "source_type", *PROVENANCE_FIELDS],
+    )
+    write_csv(
+        relationships_output,
+        relationships,
+        fieldnames=["source_entity_id", "target_entity_id", "relationship_type", "confidence", "source", "source_name", "source_type", *PROVENANCE_FIELDS],
+    )
     duration = time.time() - start_time
     print(f"Entity Builder: wrote {len(entities)} entities to {entities_output}")
     print(f"Entity Builder: wrote {len(relationships)} relationships to {relationships_output}")
@@ -347,21 +356,8 @@ def build_entity_graph(
     return entities, relationships
 
 
-def write_csv(path: Path, rows: List[Dict[str, object]]) -> None:
-    if not rows:
-        path.write_text("", encoding="utf-8")
-        return
-    fieldnames: List[str] = []
-    seen: set[str] = set()
-    for row in rows:
-        for key in row.keys():
-            if key not in seen:
-                seen.add(key)
-                fieldnames.append(key)
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+def write_csv(path: Path, rows: List[Dict[str, object]], fieldnames: List[str] | None = None) -> None:
+    write_csv_rows(path, rows, fieldnames=fieldnames)
 
 
 def main() -> None:

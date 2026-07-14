@@ -32,6 +32,7 @@ def test_health_check_passes_when_required_files_exist(tmp_path: Path, monkeypat
     write_csv(tmp_path / "config/cross_source.json")
     write_csv(tmp_path / "config/statistical_risk.json")
     write_csv(tmp_path / "config/dashboard.json")
+    write_csv(tmp_path / "config/correlation_scoring.json")
     write_csv(tmp_path / "data/processed/anomaly_report.csv")
     write_csv(tmp_path / "data/processed/fraud_markers.csv")
     write_csv(tmp_path / "data/processed/fraud_marker_summary.csv")
@@ -66,6 +67,8 @@ def test_health_check_passes_when_required_files_exist(tmp_path: Path, monkeypat
     pd.DataFrame([{"marker_id": "shared_address_businesses", "entity_id": "entity:1", "original_marker_score": 18, "contextual_adjustment": 2, "adjusted_marker_score": 20}]).to_csv(tmp_path / "data/processed/contextual_risk_adjustments.csv", index=False)
     pd.DataFrame([{"metric": "marker_counts_before_adjustment", "value": 1}]).to_csv(tmp_path / "data/processed/statistical_calibration_report.csv", index=False)
     write_json(tmp_path / "data/processed/statistical_marker_summary.json")
+    write_json(tmp_path / "data/processed/pipeline_profile.json")
+    write_json(tmp_path / "data/processed/pipeline_resume_state.json")
     pd.DataFrame([{
         "lead_id": "lead:1",
         "lead_type": "ENTITY",
@@ -123,6 +126,7 @@ def test_health_check_validates_exports_when_present(tmp_path: Path, monkeypatch
     write_csv(tmp_path / "config/cross_source.json")
     write_csv(tmp_path / "config/statistical_risk.json")
     write_csv(tmp_path / "config/dashboard.json")
+    write_csv(tmp_path / "config/correlation_scoring.json")
     write_csv(tmp_path / "data/processed/anomaly_report.csv")
     write_csv(tmp_path / "data/processed/fraud_markers.csv")
     write_csv(tmp_path / "data/processed/fraud_marker_summary.csv")
@@ -157,6 +161,8 @@ def test_health_check_validates_exports_when_present(tmp_path: Path, monkeypatch
     pd.DataFrame([{"marker_id": "shared_address_businesses", "entity_id": "entity:1", "original_marker_score": 18, "contextual_adjustment": 2, "adjusted_marker_score": 20}]).to_csv(tmp_path / "data/processed/contextual_risk_adjustments.csv", index=False)
     pd.DataFrame([{"metric": "marker_counts_before_adjustment", "value": 1}]).to_csv(tmp_path / "data/processed/statistical_calibration_report.csv", index=False)
     write_json(tmp_path / "data/processed/statistical_marker_summary.json")
+    write_json(tmp_path / "data/processed/pipeline_profile.json")
+    write_json(tmp_path / "data/processed/pipeline_resume_state.json")
     pd.DataFrame([{
         "lead_id": "lead:1",
         "lead_type": "ENTITY",
@@ -216,6 +222,7 @@ def test_health_check_fails_when_required_csv_is_empty(tmp_path: Path, monkeypat
     write_csv(tmp_path / "config/cross_source.json")
     write_csv(tmp_path / "config/statistical_risk.json")
     write_csv(tmp_path / "config/dashboard.json")
+    write_csv(tmp_path / "config/correlation_scoring.json")
     (tmp_path / "data/processed").mkdir(parents=True)
     (tmp_path / "data/processed/anomaly_report.csv").write_text("", encoding="utf-8")
     write_csv(tmp_path / "data/processed/fraud_markers.csv")
@@ -242,6 +249,8 @@ def test_health_check_fails_when_required_csv_is_empty(tmp_path: Path, monkeypat
     write_csv(tmp_path / "data/processed/contextual_risk_adjustments.csv")
     write_csv(tmp_path / "data/processed/statistical_calibration_report.csv")
     write_json(tmp_path / "data/processed/statistical_marker_summary.json")
+    write_json(tmp_path / "data/processed/pipeline_profile.json")
+    write_json(tmp_path / "data/processed/pipeline_resume_state.json")
     pd.DataFrame([{
         "lead_id": "lead:1",
         "lead_type": "ENTITY",
@@ -300,6 +309,7 @@ def test_main_exits_with_failure_for_missing_file(tmp_path: Path, monkeypatch: p
     write_csv(tmp_path / "config/cross_source.json")
     write_csv(tmp_path / "config/statistical_risk.json")
     write_csv(tmp_path / "config/dashboard.json")
+    write_csv(tmp_path / "config/correlation_scoring.json")
     write_csv(tmp_path / "data/processed/anomaly_report.csv")
     write_csv(tmp_path / "data/processed/fraud_markers.csv")
     write_csv(tmp_path / "data/processed/fraud_marker_summary.csv")
@@ -324,6 +334,8 @@ def test_main_exits_with_failure_for_missing_file(tmp_path: Path, monkeypatch: p
     write_csv(tmp_path / "data/processed/contextual_risk_adjustments.csv")
     write_csv(tmp_path / "data/processed/statistical_calibration_report.csv")
     write_json(tmp_path / "data/processed/statistical_marker_summary.json")
+    write_json(tmp_path / "data/processed/pipeline_profile.json")
+    write_json(tmp_path / "data/processed/pipeline_resume_state.json")
     pd.DataFrame([{
         "lead_id": "lead:1",
         "lead_type": "ENTITY",
@@ -426,3 +438,72 @@ def test_health_check_fails_when_required_config_is_missing(tmp_path: Path, monk
 
     assert passed is False
     assert any("sources.json" in message for message in messages)
+
+
+def test_health_check_fails_on_duplicate_entity_ids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "local_osint.duckdb").write_bytes(b"duckdb")
+    (tmp_path / "data" / "processed").mkdir(parents=True, exist_ok=True)
+    for config_name in [
+        "entity_scoring.json",
+        "rules.json",
+        "sources.json",
+        "api_sources.json",
+        "entity_resolution.json",
+        "fraud_markers.json",
+        "network_detection.json",
+        "investigation_engine.json",
+        "cross_source.json",
+        "statistical_risk.json",
+        "dashboard.json",
+        "correlation_scoring.json",
+    ]:
+        write_csv(tmp_path / "config" / config_name)
+    pd.DataFrame([{"entity_id": "e1"}, {"entity_id": "e1"}]).to_csv(tmp_path / "data/processed/entities.csv", index=False)
+    pd.DataFrame([{"relationship_id": "r1", "source_entity_id": "e1", "target_entity_id": "e1"}]).to_csv(tmp_path / "data/processed/relationships.csv", index=False)
+    pd.DataFrame([{"canonical_entity_id": "c1"}]).to_csv(tmp_path / "data/processed/canonical_entities.csv", index=False)
+    pd.DataFrame([{"canonical_entity_id": "c1"}]).to_csv(tmp_path / "data/processed/entity_aliases.csv", index=False)
+    pd.DataFrame([{"match_id": "m1"}]).to_csv(tmp_path / "data/processed/entity_resolution_matches.csv", index=False)
+    pd.DataFrame([{"relationship_id": "r1"}]).to_csv(tmp_path / "data/processed/canonical_relationships.csv", index=False)
+    for csv_name in [
+        "anomaly_report.csv",
+        "fraud_markers.csv",
+        "fraud_marker_summary.csv",
+        "entity_risk.csv",
+        "investigation_leads.csv",
+        "entity_timelines.csv",
+        "evidence_packets.csv",
+        "network_clusters.csv",
+        "network_summary.csv",
+        "network_members.csv",
+        "network_edges.csv",
+        "statistical_baselines.csv",
+        "statistical_rarity.csv",
+        "contextual_risk_adjustments.csv",
+        "statistical_calibration_report.csv",
+        "prioritized_leads.csv",
+        "investigation_summary.csv",
+        "lead_evidence_index.csv",
+        "review_recommendations.csv",
+    ]:
+        write_csv(tmp_path / "data/processed" / csv_name)
+    pd.DataFrame([{
+        "cross_source_match_id": "cross:1",
+        "canonical_entity_id": "c1",
+        "entity_type": "address",
+        "left_source_name": "a",
+        "right_source_name": "b",
+        "match_method": "m",
+        "decision": "AUTO_MATCH",
+        "contains_real_data": True,
+    }]).to_csv(tmp_path / "data/processed/cross_source_matches.csv", index=False)
+    pd.DataFrame([{"metric": "m", "value": "1"}]).to_csv(tmp_path / "data/processed/cross_source_diagnostics.csv", index=False)
+    write_json(tmp_path / "data/processed/cross_source_diagnostic_summary.json")
+    write_json(tmp_path / "data/processed/statistical_marker_summary.json")
+    write_json(tmp_path / "data/processed/pipeline_profile.json")
+    write_json(tmp_path / "data/processed/pipeline_resume_state.json")
+
+    passed, messages = check_project_health()
+
+    assert passed is False
+    assert any("Duplicate entity_id values found" in message for message in messages)

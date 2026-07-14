@@ -41,6 +41,8 @@ def test_run_pipeline_creates_all_steps(tmp_path: Path) -> None:
     contextual_adjustments_path = processed_dir / "contextual_risk_adjustments.csv"
     statistical_summary_path = processed_dir / "statistical_marker_summary.json"
     statistical_calibration_report_path = processed_dir / "statistical_calibration_report.csv"
+    pipeline_profile_path = processed_dir / "pipeline_profile.json"
+    pipeline_resume_state_path = processed_dir / "pipeline_resume_state.json"
 
     run_pipeline(
         records=10,
@@ -84,6 +86,8 @@ def test_run_pipeline_creates_all_steps(tmp_path: Path) -> None:
     assert contextual_adjustments_path.exists()
     assert statistical_summary_path.exists()
     assert statistical_calibration_report_path.exists()
+    assert pipeline_profile_path.exists()
+    assert pipeline_resume_state_path.exists()
 
     entity_risk = pd.read_csv(entity_risk_path)
     assert "entity_id" in entity_risk.columns
@@ -514,6 +518,7 @@ def test_run_pipeline_runs_health_check_when_requested(tmp_path: Path, capsys: p
     (config_dir / "cross_source.json").write_text("{}", encoding="utf-8")
     (config_dir / "statistical_risk.json").write_text("{}", encoding="utf-8")
     (config_dir / "dashboard.json").write_text("{}", encoding="utf-8")
+    (config_dir / "correlation_scoring.json").write_text("{}", encoding="utf-8")
 
     original_cwd = Path.cwd()
     try:

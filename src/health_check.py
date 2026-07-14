@@ -40,6 +40,8 @@ REQUIRED_CSV_FILES = [
 REQUIRED_JSON_FILES = [
     Path("data/processed/cross_source_diagnostic_summary.json"),
     Path("data/processed/statistical_marker_summary.json"),
+    Path("data/processed/pipeline_profile.json"),
+    Path("data/processed/pipeline_resume_state.json"),
 ]
 CONFIG_FILES = [
     Path("config/entity_scoring.json"),
@@ -53,6 +55,7 @@ CONFIG_FILES = [
     Path("config/cross_source.json"),
     Path("config/statistical_risk.json"),
     Path("config/dashboard.json"),
+    Path("config/correlation_scoring.json"),
 ]
 EXPORT_FILES = [
     Path("exports/high_risk_entities.csv"),
@@ -147,12 +150,66 @@ def _check_csv_has_rows(path: Path) -> tuple[bool, Optional[str]]:
     if path.stat().st_size == 0:
         return False, f"Empty file: {path}"
     try:
-        pd.read_csv(path, nrows=1)
+        frame = pd.read_csv(path)
+        if len(frame) == 0:
+            return False, f"CSV has header only and no data rows: {path}"
         return True, None
     except pd.errors.EmptyDataError:
         return False, f"CSV has no rows: {path}"
     except Exception as exc:
         return False, f"Unable to read CSV {path}: {exc}"
+
+
+def _check_duplicate_ids(path: Path, id_column: str) -> tuple[bool, Optional[str]]:
+    if not path.exists() or path.stat().st_size == 0:
+        return False, f"Missing or empty file for duplicate check: {path}"
+    try:
+        frame = pd.read_csv(path)
+    except Exception as exc:
+        return False, f"Unable to read duplicate-check file {path}: {exc}"
+    if id_column not in frame.columns:
+        return True, None
+    duplicate_count = int(frame[id_column].astype(str).duplicated().sum())
+    if duplicate_count:
+        return False, f"Duplicate {id_column} values found in {path}: {duplicate_count}"
+    return True, None
+
+
+def _check_orphan_relationships(entities_path: Path, relationships_path: Path) -> tuple[bool, Optional[str]]:
+    try:
+        entities = pd.read_csv(entities_path)
+        relationships = pd.read_csv(relationships_path)
+    except Exception as exc:
+        return False, f"Unable to validate orphan relationships: {exc}"
+    if "entity_id" not in entities.columns:
+        return True, None
+    required_relationship_columns = {"source_entity_id", "target_entity_id"}
+    if not required_relationship_columns.issubset(relationships.columns):
+        return True, None
+    entity_ids = set(entities["entity_id"].astype(str))
+    missing = relationships[
+        ~relationships["source_entity_id"].astype(str).isin(entity_ids)
+        | ~relationships["target_entity_id"].astype(str).isin(entity_ids)
+    ]
+    if not missing.empty:
+        return False, f"Orphan relationships found: {len(missing)}"
+    return True, None
+
+
+def _check_address_quality(entities_path: Path) -> tuple[bool, Optional[str]]:
+    try:
+        frame = pd.read_csv(entities_path)
+    except Exception as exc:
+        return False, f"Unable to validate address quality: {exc}"
+    if "entity_type" not in frame.columns or "display_name" not in frame.columns:
+        return True, None
+    address_rows = frame[frame["entity_type"].astype(str) == "address"].copy()
+    if address_rows.empty:
+        return True, None
+    malformed = address_rows["display_name"].astype(str).str.strip().eq("")
+    if malformed.any():
+        return False, f"Malformed addresses found: {int(malformed.sum())}"
+    return True, None
 
 
 def _check_required_columns(path: Path, required_columns: set[str]) -> tuple[bool, Optional[str]]:
@@ -237,6 +294,35 @@ def check_project_health() -> tuple[bool, list[str]]:
                     messages.append(f"PASS: Optional export exists {path}")
         else:
             messages.append(f"PASS: Optional export not present {path}")
+
+    duplicate_checks = [
+        (Path("data/processed/entities.csv"), "entity_id"),
+        (Path("data/processed/relationships.csv"), "relationship_id"),
+        (Path("data/processed/canonical_entities.csv"), "canonical_entity_id"),
+        (Path("data/processed/canonical_relationships.csv"), "relationship_id"),
+        (Path("data/processed/cross_source_matches.csv"), "cross_source_match_id"),
+    ]
+    for path, column in duplicate_checks:
+        ok, message = _check_duplicate_ids(path, column)
+        if not ok and message:
+            messages.append(f"FAIL: {message}")
+            failures.append(message)
+        else:
+            messages.append(f"PASS: No duplicate {column} values in {path}")
+
+    orphan_ok, orphan_message = _check_orphan_relationships(Path("data/processed/entities.csv"), Path("data/processed/relationships.csv"))
+    if not orphan_ok and orphan_message:
+        messages.append(f"FAIL: {orphan_message}")
+        failures.append(orphan_message)
+    else:
+        messages.append("PASS: No orphan relationships in data/processed/relationships.csv")
+
+    address_ok, address_message = _check_address_quality(Path("data/processed/entities.csv"))
+    if not address_ok and address_message:
+        messages.append(f"FAIL: {address_message}")
+        failures.append(address_message)
+    else:
+        messages.append("PASS: No malformed addresses in data/processed/entities.csv")
 
     if failures:
         messages.append(f"SUMMARY: {len(failures)} checks failed.")

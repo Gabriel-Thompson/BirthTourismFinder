@@ -61,6 +61,7 @@ UNIT_PATTERN = re.compile(r"(?:\b(?:APT|APARTMENT|UNIT|STE|SUITE)\b|#)\s*([A-Z0-
 PHONE_EXTENSION_PATTERN = re.compile(r"(?:EXT|X|EXTENSION)\s*([0-9]+)$")
 EMAIL_PATTERN = re.compile(r"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}$")
 PERSON_SUFFIXES = {"JR", "SR", "II", "III", "IV", "V"}
+PERSON_CREDENTIALS = {"MD", "DO", "DDS", "DMD", "PA", "NP", "RN", "ESQ", "CPA", "JD"}
 
 
 def similarity(left: str, right: str) -> float:
@@ -136,21 +137,44 @@ def normalize_business_name(value: str) -> Dict[str, str]:
         else:
             tokens = tokens[:-1]
     normalized = " ".join(tokens).strip()
-    return {"normalized_value": normalized, "name_prefix": normalized[:8]}
+    normalized_compact = re.sub(r"\s+", " ", normalized)
+    alias_key = normalized_compact.replace(" AND ", " & ")
+    return {"normalized_value": normalized_compact, "name_prefix": normalized_compact[:8], "alias_key": alias_key}
 
 
 def normalize_person_name(value: str) -> Dict[str, str]:
     text = _clean_text(value)
     if not text:
-        return {"normalized_value": "", "surname_prefix": ""}
+        return {
+            "normalized_value": "",
+            "surname_prefix": "",
+            "middle_name": "",
+            "middle_initial": "",
+            "suffix": "",
+            "name_confidence": "none",
+        }
     tokens = [token for token in text.split() if token]
-    if tokens and tokens[-1] in PERSON_SUFFIXES:
+    suffix = tokens[-1] if tokens and tokens[-1] in PERSON_SUFFIXES else ""
+    if suffix:
         tokens = tokens[:-1]
-    if len(tokens) >= 3:
-        tokens = [tokens[0], tokens[-1]]
-    normalized = " ".join(tokens)
-    surname_prefix = tokens[-1][:6] if tokens else ""
-    return {"normalized_value": normalized, "surname_prefix": surname_prefix}
+    tokens = [token for token in tokens if token not in PERSON_CREDENTIALS]
+    first_name = tokens[0] if tokens else ""
+    last_name = tokens[-1] if len(tokens) >= 2 else first_name
+    middle_name = tokens[1] if len(tokens) >= 3 else ""
+    middle_initial = middle_name[:1] if middle_name else ""
+    normalized = " ".join(part for part in [first_name, last_name] if part).strip()
+    if not normalized:
+        normalized = " ".join(tokens[:2])
+    surname_prefix = last_name[:6] if last_name else ""
+    confidence = "strong" if first_name and last_name and middle_name else "medium" if first_name and last_name else "weak"
+    return {
+        "normalized_value": normalized,
+        "surname_prefix": surname_prefix,
+        "middle_name": middle_name,
+        "middle_initial": middle_initial,
+        "suffix": suffix,
+        "name_confidence": confidence,
+    }
 
 
 def normalize_address_value(value: str) -> Dict[str, str]:
@@ -184,12 +208,14 @@ def normalize_address_value(value: str) -> Dict[str, str]:
     normalized = building_key
     if unit:
         normalized = f"{building_key} UNIT {unit}"
+    street_name = " ".join(normalized_tokens[1:]) if len(normalized_tokens) > 1 else ""
     return {
         "normalized_value": normalized,
         "building_key": building_key,
         "unit_key": unit,
         "zip_code": zip_code,
         "address_number": address_number,
+        "street_name": street_name,
     }
 
 

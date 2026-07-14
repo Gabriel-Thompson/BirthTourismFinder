@@ -8,6 +8,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Dict, Optional
+import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -73,6 +74,8 @@ DEFAULT_PRIORITIZED_LEADS_PATH = DEFAULT_PROCESSED_DIR / "prioritized_leads.csv"
 DEFAULT_INVESTIGATION_SUMMARY_PATH = DEFAULT_PROCESSED_DIR / "investigation_summary.csv"
 DEFAULT_LEAD_EVIDENCE_INDEX_PATH = DEFAULT_PROCESSED_DIR / "lead_evidence_index.csv"
 DEFAULT_REVIEW_RECOMMENDATIONS_PATH = DEFAULT_PROCESSED_DIR / "review_recommendations.csv"
+DEFAULT_PIPELINE_PROFILE_PATH = DEFAULT_PROCESSED_DIR / "pipeline_profile.json"
+DEFAULT_PIPELINE_RESUME_STATE_PATH = DEFAULT_PROCESSED_DIR / "pipeline_resume_state.json"
 DEFAULT_SUNBIZ_ENTITIES_PATH = DEFAULT_PROCESSED_DIR / "sunbiz_entities.csv"
 DEFAULT_SUNBIZ_RELATIONSHIPS_PATH = DEFAULT_PROCESSED_DIR / "sunbiz_relationships.csv"
 DEFAULT_SUNBIZ_DAILY_STATUS_JSON_PATH = DEFAULT_PROCESSED_DIR / "sunbiz_daily_status.json"
@@ -174,6 +177,12 @@ def _taxonomy_description_from_filter(value: str | None) -> str | None:
     return candidate or None
 
 
+def _write_json(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+
+
 def run_pipeline(
     records: int = 250,
     source_dir: Optional[Path | str] = None,
@@ -227,6 +236,45 @@ def run_pipeline(
     canonical_relationships_path = processed_path / DEFAULT_CANONICAL_RELATIONSHIPS_PATH.name
     fraud_markers_path = processed_path / DEFAULT_FRAUD_MARKERS_PATH.name
     fraud_marker_summary_path = processed_path / DEFAULT_FRAUD_MARKER_SUMMARY_PATH.name
+    pipeline_profile_path = processed_path / DEFAULT_PIPELINE_PROFILE_PATH.name
+    pipeline_resume_state_path = processed_path / DEFAULT_PIPELINE_RESUME_STATE_PATH.name
+    pipeline_profile: dict[str, object] = {
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "steps": [],
+        "records": {},
+    }
+    resume_state: dict[str, object] = {
+        "started_at": pipeline_profile["started_at"],
+        "steps": [],
+        "completed_stages": [],
+        "failed_stages": [],
+    }
+
+    def mark_step(name: str, *, started_at: float, status: str, rows_processed: int | None = None, notes: str = "") -> None:
+        runtime = round(time.time() - started_at, 2)
+        step_payload = {
+            "step": name,
+            "status": status,
+            "runtime_seconds": runtime,
+            "rows_processed": int(rows_processed or 0),
+            "notes": notes,
+        }
+        cast_steps = pipeline_profile["steps"]
+        assert isinstance(cast_steps, list)
+        cast_steps.append(step_payload)
+        resume_steps = resume_state["steps"]
+        assert isinstance(resume_steps, list)
+        resume_steps.append(step_payload)
+        if status == "PASS":
+            completed = resume_state["completed_stages"]
+            assert isinstance(completed, list)
+            completed.append(name)
+        else:
+            failed = resume_state["failed_stages"]
+            assert isinstance(failed, list)
+            failed.append(name)
+        _write_json(pipeline_profile_path, pipeline_profile)
+        _write_json(pipeline_resume_state_path, resume_state)
 
     validate_source("synthetic")
     ensure_local_only_path("synthetic", source_path)
@@ -247,6 +295,7 @@ def run_pipeline(
 
     current_step = 1
     if reset:
+        step_started = time.time()
         print(f"Step {current_step}/{total_steps}: Reset generated artifacts")
         deleted_paths = reset_generated_artifacts(
             output_db=db_path,
@@ -262,8 +311,10 @@ def run_pipeline(
                 print(f"  Deleted {display_path}")
         else:
             print("  No generated artifacts found to delete.")
+        mark_step("reset_generated_artifacts", started_at=step_started, status="PASS", rows_processed=len(deleted_paths), notes="Deleted generated artifacts before rebuild.")
         current_step += 1
     if clear_lead_packages_flag:
+        step_started = time.time()
         print(f"Step {current_step}/{total_steps}: Clear generated lead packages")
         deleted_packages = clear_lead_packages(lead_package_root, workspace_root=workspace_root)
         if deleted_packages:
@@ -275,26 +326,33 @@ def run_pipeline(
                 print(f"  Deleted {display_path}")
         else:
             print("  No generated lead packages found to delete.")
+        mark_step("clear_lead_packages", started_at=step_started, status="PASS", rows_processed=len(deleted_packages), notes="Cleared generated lead packages.")
         current_step += 1
 
     print(f"Step {current_step}/{total_steps}: Ensure synthetic data")
+    step_started = time.time()
     if synthetic_is_missing_or_empty(source_path):
         print(f"  Synthetic data missing or incomplete at {source_path}. Generating synthetic CSVs...")
         generate_synthetic_dataset(records=records, output_dir=source_path)
         print(f"  Generated synthetic CSV files in {source_path}")
     else:
         print(f"  Existing synthetic data found in {source_path}. Skipping generation.")
+    mark_step("ensure_synthetic_data", started_at=step_started, status="PASS", rows_processed=records, notes=f"Synthetic directory {source_path}")
     current_step += 1
 
     print(f"Step {current_step}/{total_steps}: Load CSVs into DuckDB")
+    step_started = time.time()
     manifest = load_synthetic_data(source_dir=source_path, output_db=db_path, processed_dir=processed_path)
     print(f"  Loaded {len(manifest)} CSV files into DuckDB at {db_path}")
+    mark_step("load_duckdb", started_at=step_started, status="PASS", rows_processed=len(manifest), notes=f"DuckDB path {db_path}")
     current_step += 1
 
     connector_entity_paths: list[Path] = []
     connector_relationship_paths: list[Path] = []
     if include_connectors or include_sunbiz or include_nppes:
         print(f"Step {current_step}/{total_steps}: Ingest connector data")
+        step_started = time.time()
+        connector_failures: list[str] = []
         connector_input_root = source_path.parents[0]
         sunbiz_entities_path = processed_path / "sunbiz_entities.csv"
         sunbiz_relationships_path = processed_path / "sunbiz_relationships.csv"
@@ -346,8 +404,10 @@ def run_pipeline(
                 connector_relationship_paths.append(nppes_relationships_path)
             except ValueError as exc:
                 print(f"  Skipping NPPES source {DEFAULT_NPPES_SOURCE_NAME}: {exc}")
+                connector_failures.append(f"nppes:{exc}")
             except Exception as exc:
                 print(f"  Skipping NPPES source {DEFAULT_NPPES_SOURCE_NAME}: connector execution failed ({exc}).")
+                connector_failures.append(f"nppes:{exc}")
 
         if include_sunbiz:
             try:
@@ -407,8 +467,10 @@ def run_pipeline(
                 connector_relationship_paths.append(sunbiz_relationships_path)
             except subprocess.CalledProcessError as exc:
                 print(f"  Skipping Sunbiz Daily connector {DEFAULT_SUNBIZ_DAILY_SOURCE_NAME}: connector execution failed ({exc.returncode}).")
+                connector_failures.append(f"sunbiz_daily:{exc.returncode}")
             except ValueError as exc:
                 print(f"  Skipping Sunbiz Daily connector {DEFAULT_SUNBIZ_DAILY_SOURCE_NAME}: {exc}")
+                connector_failures.append(f"sunbiz_daily:{exc}")
         elif include_connectors:
             sunbiz_input_path = connector_input_root / DEFAULT_SUNBIZ_INPUT_PATH.relative_to("data/raw")
             if sunbiz_input_path.exists():
@@ -539,6 +601,7 @@ def run_pipeline(
                     print(f"  Skipping API connector {DEFAULT_API_SOURCE_NAME}: connector execution failed ({exc.returncode}).")
             except ValueError as exc:
                 print(f"  Skipping API connector {DEFAULT_API_SOURCE_NAME}: {exc}")
+                connector_failures.append(f"api:{exc}")
 
             try:
                 validate_source(DEFAULT_ARCGIS_SOURCE_NAME, require_live_access=True)
@@ -568,11 +631,21 @@ def run_pipeline(
                         f"  Skipping ArcGIS connector {DEFAULT_ARCGIS_SOURCE_NAME}: "
                         f"connector execution failed ({exc.returncode})."
                     )
+                    connector_failures.append(f"arcgis:{exc.returncode}")
             except ValueError as exc:
                 print(f"  Skipping ArcGIS connector {DEFAULT_ARCGIS_SOURCE_NAME}: {exc}")
+                connector_failures.append(f"arcgis:{exc}")
+        mark_step(
+            "ingest_connectors",
+            started_at=step_started,
+            status="PASS" if not connector_failures else "PARTIAL",
+            rows_processed=len(connector_entity_paths) + len(connector_relationship_paths),
+            notes="; ".join(connector_failures) if connector_failures else "Connector ingest completed.",
+        )
         current_step += 1
 
     print(f"Step {current_step}/{total_steps}: Build entities and relationships")
+    step_started = time.time()
 
     build_entity_graph(
         db_path=db_path,
@@ -583,9 +656,11 @@ def run_pipeline(
     )
     print(f"  Wrote entities to {entities_path}")
     print(f"  Wrote relationships to {relationships_path}")
+    mark_step("build_entity_graph", started_at=step_started, status="PASS", notes=f"Outputs {entities_path.name}, {relationships_path.name}")
     current_step += 1
 
     print(f"Step {current_step}/{total_steps}: Resolve canonical entities")
+    step_started = time.time()
     resolution_summary = resolve_entities(
         entities_path=entities_path,
         relationships_path=relationships_path,
@@ -609,9 +684,11 @@ def run_pipeline(
         f"merged={resolution_summary['merged_entities']} "
         f"review={resolution_summary['review_candidates']}"
     )
+    mark_step("resolve_entities", started_at=step_started, status="PASS", rows_processed=int(resolution_summary["canonical_entity_count"]))
     current_step += 1
 
     print(f"Step {current_step}/{total_steps}: Build cross-source diagnostics and matches")
+    step_started = time.time()
     cross_source_summary = run_cross_source_correlation(
         canonical_entities_path=canonical_entities_path,
         aliases_path=aliases_path,
@@ -669,9 +746,11 @@ def run_pipeline(
                         json.dump(status_payload, handle, indent=2)
             except Exception:
                 pass
+    mark_step("cross_source_correlation", started_at=step_started, status="PASS", rows_processed=int(cross_source_summary["cross_source_match_count"]))
     current_step += 1
 
     print(f"Step {current_step}/{total_steps}: Calculate statistical baselines and rarity")
+    step_started = time.time()
     statistical_summary = run_statistical_risk(
         canonical_entities_path=canonical_entities_path,
         canonical_relationships_path=canonical_relationships_path,
@@ -687,9 +766,11 @@ def run_pipeline(
         f"baseline_groups={statistical_summary['records_loaded']['baseline_groups_created']} "
         f"insufficient={statistical_summary['insufficient_baseline_count']}"
     )
+    mark_step("statistical_risk", started_at=step_started, status="PASS", rows_processed=int(statistical_summary["markers_evaluated"]))
     current_step += 1
 
     print(f"Step {current_step}/{total_steps}: Run fraud marker engine")
+    step_started = time.time()
     engine = FraudMarkerEngine(
         db_path=db_path,
         entities_path=canonical_entities_path,
@@ -708,9 +789,11 @@ def run_pipeline(
     print(f"  Wrote fraud marker summary to {fraud_marker_summary_path}")
     print(f"  Wrote anomaly report to {anomaly_path}")
     print(f"  Found {summary['High']} High, {summary['Medium']} Medium, {summary['Low']} Low findings")
+    mark_step("fraud_marker_engine", started_at=step_started, status="PASS", rows_processed=len(findings))
     current_step += 1
 
     print(f"Step {current_step}/{total_steps}: Run entity intelligence")
+    step_started = time.time()
     entity_intelligence_main(
         entities_path=canonical_entities_path,
         relationships_path=canonical_relationships_path,
@@ -719,9 +802,17 @@ def run_pipeline(
         config_path=None,
     )
     print(f"  Wrote entity risk summary to {entity_risk_path}")
+    entity_risk_rows = 0
+    if entity_risk_path.exists():
+        try:
+            entity_risk_rows = len(pd.read_csv(entity_risk_path))
+        except Exception:
+            entity_risk_rows = 0
+    mark_step("entity_intelligence", started_at=step_started, status="PASS", rows_processed=entity_risk_rows)
     current_step += 1
 
     print(f"Step {current_step}/{total_steps}: Build investigation workspace")
+    step_started = time.time()
     investigation_summary = build_investigation_workspace(
         entity_risk_path=entity_risk_path,
         fraud_markers_path=fraud_markers_path,
@@ -737,9 +828,11 @@ def run_pipeline(
         f"timeline_events={investigation_summary['timeline_event_count']} "
         f"evidence_packets={investigation_summary['evidence_packet_count']}"
     )
+    mark_step("investigation_workspace", started_at=step_started, status="PASS", rows_processed=int(investigation_summary["lead_count"]))
     current_step += 1
 
     print(f"Step {current_step}/{total_steps}: Build network intelligence")
+    step_started = time.time()
     network_summary = build_network_intelligence(
         entities_path=canonical_entities_path,
         relationships_path=canonical_relationships_path,
@@ -756,9 +849,11 @@ def run_pipeline(
         f"communities={network_summary['community_count']} "
         f"bridge_entities={network_summary['bridge_entity_count']}"
     )
+    mark_step("network_intelligence", started_at=step_started, status="PASS", rows_processed=int(network_summary["network_count"]))
     current_step += 1
 
     print(f"Step {current_step}/{total_steps}: Prioritize and package final investigation leads")
+    step_started = time.time()
     investigation_engine_summary = run_investigation_engine(
         investigation_leads_path=processed_path / DEFAULT_INVESTIGATION_LEADS_PATH.name,
         network_clusters_path=processed_path / DEFAULT_NETWORK_CLUSTERS_PATH.name,
@@ -781,16 +876,26 @@ def run_pipeline(
         f"  Prioritized leads={investigation_engine_summary['total_prioritized_leads']} "
         f"packages={investigation_engine_summary['package_count']}"
     )
+    mark_step("investigation_engine", started_at=step_started, status="PASS", rows_processed=int(investigation_engine_summary["total_prioritized_leads"]))
     current_step += 1
 
     if run_health_check:
         print(f"Step {current_step}/{total_steps}: Run health check")
+        step_started = time.time()
         passed, messages = check_project_health()
         for message in messages:
             print(f"  {message}")
         if not passed:
+            mark_step("health_check", started_at=step_started, status="FAIL", notes="Health check failed after pipeline execution.")
             raise RuntimeError("Health check failed after pipeline execution.")
         print("  Health check passed.")
+        mark_step("health_check", started_at=step_started, status="PASS")
+    pipeline_profile["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    pipeline_profile["total_runtime_seconds"] = round(time.time() - pipeline_start, 2)
+    resume_state["finished_at"] = pipeline_profile["finished_at"]
+    resume_state["status"] = "PASS"
+    _write_json(pipeline_profile_path, pipeline_profile)
+    _write_json(pipeline_resume_state_path, resume_state)
     print(f"Pipeline: completed successfully in {time.time() - pipeline_start:.2f}s")
     print("Pipeline completed successfully.")
 

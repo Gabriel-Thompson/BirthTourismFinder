@@ -48,13 +48,25 @@ def empty_frame(columns: list[str]) -> pd.DataFrame:
     return pd.DataFrame(columns=columns)
 
 
+@st.cache_data(show_spinner=False)
+def _cached_read_csv(path_str: str, mtime_ns: int) -> pd.DataFrame:
+    return pd.read_csv(path_str)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_read_json(path_str: str, mtime_ns: int) -> dict[str, object]:
+    with Path(path_str).open("r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    return data if isinstance(data, dict) else {}
+
+
 def load_csv(path: Path, columns: list[str], warning_message: str | None = None) -> pd.DataFrame:
     if not path.exists():
         if warning_message:
             st.warning(warning_message)
         return empty_frame(columns)
     try:
-        df = pd.read_csv(path)
+        df = _cached_read_csv(str(path), path.stat().st_mtime_ns)
     except Exception as exc:
         if warning_message:
             st.warning(f"{warning_message} ({exc})")
@@ -69,8 +81,7 @@ def load_json(path: Path) -> dict[str, object]:
     if not path.exists() or path.stat().st_size == 0:
         return {}
     try:
-        with path.open("r", encoding="utf-8") as handle:
-            data = json.load(handle)
+        data = _cached_read_json(str(path), path.stat().st_mtime_ns)
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}

@@ -16,6 +16,25 @@ from src.connectors.source_manifest import REPO_ROOT
 def render_page(*, source_health_df: pd.DataFrame) -> None:
     show_dataframe(source_health_df, empty_message="No source health report available.")
     load_dotenv(REPO_ROOT / ".env")
+    pipeline_profile_path = REPO_ROOT / "data" / "processed" / "pipeline_profile.json"
+    if pipeline_profile_path.exists() and pipeline_profile_path.stat().st_size > 0:
+        try:
+            with pipeline_profile_path.open("r", encoding="utf-8") as handle:
+                pipeline_profile = json.load(handle)
+        except Exception:
+            pipeline_profile = {}
+    else:
+        pipeline_profile = {}
+    if pipeline_profile:
+        st.subheader("Pipeline Profile")
+        cols = st.columns(4)
+        cols[0].metric("Pipeline Runtime", f"{pipeline_profile.get('total_runtime_seconds', 0)}s")
+        steps = pipeline_profile.get("steps", [])
+        cols[1].metric("Steps Recorded", len(steps) if isinstance(steps, list) else 0)
+        rows_processed = sum(int(step.get("rows_processed", 0)) for step in steps) if isinstance(steps, list) else 0
+        cols[2].metric("Rows Processed", rows_processed)
+        partial_failures = sum(1 for step in steps if str(step.get("status", "")).upper() not in {"PASS"}) if isinstance(steps, list) else 0
+        cols[3].metric("Non-PASS Steps", partial_failures)
     status_path = REPO_ROOT / "data" / "processed" / "sunbiz_daily_import_summary.json"
     compatibility_status_path = REPO_ROOT / "data" / "processed" / "sunbiz_daily_status.json"
     st.subheader("Sunbiz Daily")
