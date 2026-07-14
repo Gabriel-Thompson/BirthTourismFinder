@@ -1,0 +1,65 @@
+# NPPES / NPI
+
+- Source name: National Plan and Provider Enumeration System (NPPES) / NPI Registry
+- Official CMS source URLs:
+  - https://npiregistry.cms.hhs.gov/
+  - https://www.cms.gov/medicare/regulations-guidance/administrative-simplification/data-dissemination
+  - https://download.cms.gov/nppes/NPI_Files.html
+- API access method: Official CMS NPI Registry query API at `https://npiregistry.cms.hhs.gov/api/`
+- Downloadable-file access method: Official CMS monthly replacement, weekly incremental, and deactivation ZIP files from `download.cms.gov`
+- Update frequency:
+  - Registry: query-only registry updated daily according to the CMS dissemination page
+  - Downloadable files: monthly replacement files plus weekly incremental files
+- Expected file size:
+  - Monthly ZIP: large; CMS listed 1,092.10 MB for the July 13, 2026 V.2 monthly ZIP
+  - Weekly ZIP: smaller; CMS listed 6.55 MB for the July 6-12, 2026 V.2 weekly ZIP
+- Public-data status: FOIA-disclosable public provider registry data
+- Privacy limitations:
+  - NPPES data is self-reported or submitted by authorized parties
+  - Missing fields must not be treated as suspicious
+  - Deactivated NPI handling is limited; CMS notes that for deactivated records users should generally rely only on the deactivated NPI and deactivation date
+- Usage limitations:
+  - An NPI does not prove active licensing
+  - An NPI does not prove Medicare or Medicaid enrollment
+  - An NPI does not prove that claims were submitted
+  - An address match does not prove common ownership
+  - NPPES should be treated as source-attributed lead data only
+- Deactivated-NPI handling:
+  - Keep deactivation and reactivation fields
+  - Do not treat deactivation alone as suspicious
+  - Keep deactivated records as historical context only
+- Fields used by OpenFraud:
+  - NPI
+  - Enumeration type
+  - Entity type code
+  - Provider names
+  - Organization name
+  - Credential
+  - Gender when publicly disseminated
+  - Enumeration date
+  - Last update date
+  - Deactivation/reactivation/replacement fields
+  - Sole proprietor and organization subpart indicators
+  - Parent organization name when publicly available
+  - Authorized official name and title when publicly available
+  - Practice and mailing addresses
+  - Taxonomy code/description/license fields when publicly disseminated
+  - Other organization names
+- Fields intentionally excluded:
+  - Claims data
+  - Enrollment assertions
+  - Licensing validity assertions
+  - Patient information
+  - Billing activity
+  - Any inferred ownership not explicitly supported by source data
+- Investigative-use disclaimer:
+  - OpenFraud uses NPPES only for explainable public-record correlation
+  - Results are investigative leads requiring independent verification
+  - No provider or organization should be labeled as fraudulent based on NPPES presence or correlation alone
+
+Notes from current official CMS pages reviewed on July 14, 2026:
+
+- CMS states that the NPI Registry is a query-only database with no charge to view data.
+- CMS states that the downloadable files are also available at no charge.
+- CMS states that the full replacement monthly file now includes deactivated NPIs and deactivation dates.
+- CMS lists Version 2 as the current downloadable-file version and states Version 1 support ended on March 3, 2026.

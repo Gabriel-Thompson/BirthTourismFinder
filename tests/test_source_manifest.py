@@ -28,6 +28,7 @@ def test_load_sources_contains_expected_entries() -> None:
         "sunbiz_daily_api",
         "county_property_local_file",
         "county_clerk_local_file",
+        "nppes_npi",
         "sample_api",
         "sample_arcgis_parcels",
         "escambia_arcgis_parcels",

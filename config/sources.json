@@ -84,6 +84,31 @@
     ],
     "notes": "Compatibility alias for older Sunbiz Daily pipeline references. New work should use the canonical source name `sunbiz_daily`."
   },
+  "nppes_npi": {
+    "source_name": "nppes_npi",
+    "source_type": "official_federal_registry",
+    "access_method": "official_cms_registry_api_or_official_cms_bulk_file",
+    "live_access_allowed": true,
+    "terms_review_required": true,
+    "review_document": "docs/source_reviews/nppes_npi.md",
+    "imported_at": "",
+    "data_path": "config/nppes_npi.json",
+    "processed_outputs": [
+      "data/processed/nppes_providers.csv",
+      "data/processed/nppes_entities.csv",
+      "data/processed/nppes_relationships.csv",
+      "data/processed/nppes_taxonomies.csv",
+      "data/processed/nppes_import_summary.json",
+      "data/processed/nppes_import_diagnostics.csv",
+      "data/processed/nppes_import_manifest.json",
+      "data/processed/nppes_sunbiz_matches.csv",
+      "data/processed/nppes_parcel_matches.csv",
+      "data/processed/nppes_sunbiz_parcel_paths.csv",
+      "data/processed/nppes_match_quality_report.json",
+      "data/processed/nppes_match_quality_samples.csv"
+    ],
+    "notes": "Official CMS NPPES/NPI data source. Use bounded official registry API queries or local official bulk files only. Do not scrape the registry website."
+  },
   "county_property_local_file": {
     "source_name": "county_property_local_file",
     "source_type": "local_property_export",

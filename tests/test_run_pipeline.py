@@ -451,6 +451,47 @@ def test_run_pipeline_includes_arcgis_connector_outputs(tmp_path: Path) -> None:
     assert "PROPERTY_OWNED_BY" in set(relationships["relationship_type"])
 
 
+def test_run_pipeline_includes_nppes_mock_outputs(tmp_path: Path) -> None:
+    source_dir = tmp_path / "data" / "raw" / "synthetic"
+    processed_dir = tmp_path / "data" / "processed"
+    output_db = tmp_path / "local_osint.duckdb"
+    entities_path = processed_dir / "entities.csv"
+    relationships_path = processed_dir / "relationships.csv"
+    anomaly_path = processed_dir / "anomaly_report.csv"
+    entity_risk_path = processed_dir / "entity_risk.csv"
+    county_property_input_dir = tmp_path / "data" / "raw" / "county_property"
+    county_property_input_dir.mkdir(parents=True)
+    (county_property_input_dir / "property_records.csv").write_text(
+        "parcel_id,owner_name,situs_address,mailing_address,property_use,land_use,assessed_value,sale_date,sale_price\n"
+        "HC-1,ROBERT OWNER,\"100 Commerce Blvd Ste 200, Tampa, FL 33602\",\"PO Box 500, Tampa, FL 33601\",Residential,Single Family,350000,2025-01-01,320000\n",
+        encoding="utf-8",
+    )
+
+    run_pipeline(
+        records=10,
+        source_dir=source_dir,
+        output_db=output_db,
+        processed_dir=processed_dir,
+        entities_path=entities_path,
+        relationships_path=relationships_path,
+        anomaly_path=anomaly_path,
+        entity_risk_path=entity_risk_path,
+        include_connectors=True,
+        include_nppes=True,
+        nppes_mock=True,
+    )
+
+    assert (processed_dir / "nppes_providers.csv").exists()
+    assert (processed_dir / "nppes_entities.csv").exists()
+    assert (processed_dir / "nppes_relationships.csv").exists()
+    assert (processed_dir / "nppes_match_quality_report.json").exists()
+
+    entities = pd.read_csv(entities_path)
+    assert any(str(entity_id).startswith("provider:nppes:") for entity_id in entities["entity_id"])
+    relationships = pd.read_csv(relationships_path)
+    assert "PROVIDER_PRACTICES_AT" in set(relationships["relationship_type"])
+
+
 def test_run_pipeline_rejects_remote_synthetic_source() -> None:
     with pytest.raises(ValueError, match="does not permit live or remote access"):
         run_pipeline(source_dir="https://example.com/synthetic")

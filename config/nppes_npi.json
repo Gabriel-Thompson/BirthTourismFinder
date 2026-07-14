@@ -1,0 +1,30 @@
+{
+  "source_name": "nppes_npi",
+  "source_type": "official_federal_registry",
+  "enabled": true,
+  "api": {
+    "enabled": true,
+    "base_url": "https://npiregistry.cms.hhs.gov",
+    "endpoint": "/api/",
+    "version": "2.1",
+    "timeout_seconds": 30,
+    "retry_attempts": 3,
+    "retry_backoff_seconds": 1.0,
+    "default_limit": 200,
+    "max_records": 1200
+  },
+  "bulk": {
+    "enabled": true,
+    "input_dir": "data/raw/nppes",
+    "full_file_pattern": "*.csv",
+    "weekly_file_pattern": "*.csv",
+    "chunk_size": 50000
+  },
+  "default_state": "FL",
+  "default_city": "",
+  "default_postal_code": "",
+  "default_taxonomy": "",
+  "raw_snapshot_dir": "data/raw/nppes/api",
+  "processed_dir": "data/processed",
+  "mock_response_path": "data/raw/api/sample_nppes_api_response.json"
+}

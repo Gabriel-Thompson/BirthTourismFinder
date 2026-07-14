@@ -65,6 +65,45 @@ def render_page(*, source_health_df: pd.DataFrame) -> None:
             "Sunbiz Daily metrics are not available yet. Run `python -m src.connectors.sunbiz_daily_connector --mock --county Hillsborough --max-records 100` "
             "or `python src/run_pipeline.py --include-sunbiz --include-connectors --health-check`."
         )
+
+    nppes_summary_path = REPO_ROOT / "data" / "processed" / "nppes_import_summary.json"
+    st.subheader("CMS NPPES / NPI")
+    if nppes_summary_path.exists() and nppes_summary_path.stat().st_size > 0:
+        try:
+            with nppes_summary_path.open("r", encoding="utf-8") as handle:
+                nppes_status = json.load(handle)
+        except Exception:
+            nppes_status = {}
+    else:
+        nppes_status = {}
+
+    if nppes_status:
+        metric_cols = st.columns(6)
+        metric_cols[0].metric("Providers", int(nppes_status.get("providers_normalized", 0)))
+        metric_cols[1].metric("Individuals", int(nppes_status.get("individual_providers", 0)))
+        metric_cols[2].metric("Organizations", int(nppes_status.get("organization_providers", 0)))
+        metric_cols[3].metric("Practice Addresses", int(nppes_status.get("practice_addresses", 0)))
+        metric_cols[4].metric("Mailing Addresses", int(nppes_status.get("mailing_addresses", 0)))
+        metric_cols[5].metric("Taxonomies", int(nppes_status.get("taxonomy_records", 0)))
+        detail_cols = st.columns(4)
+        detail_cols[0].caption(f"Mode: {nppes_status.get('mode', 'unknown')}")
+        detail_cols[1].caption(f"Deactivated NPIs: {nppes_status.get('deactivated_npis', 0)}")
+        detail_cols[2].caption(f"Incomplete Records: {nppes_status.get('incomplete_records', 0)}")
+        detail_cols[3].caption(f"Last Import: {nppes_status.get('last_successful_import', '') or 'Not imported yet'}")
+        filters = nppes_status.get("filters", {}) if isinstance(nppes_status.get("filters"), dict) else {}
+        st.caption(
+            "Filters: "
+            f"state={filters.get('state', '') or 'n/a'} "
+            f"city={filters.get('city', '') or 'n/a'} "
+            f"postal={filters.get('postal_code', '') or filters.get('postal_prefix', '') or 'n/a'} "
+            f"taxonomy={filters.get('taxonomy_description', '') or filters.get('taxonomy_code', '') or 'n/a'}"
+        )
+    else:
+        st.info(
+            "NPPES metrics are not available yet. Run `python -m src.connectors.nppes.api_connector --mock --state FL --city Tampa --max-records 100` "
+            "or `python src/run_pipeline.py --include-nppes --nppes-mock --include-sunbiz --sunbiz-mock --include-connectors --health-check`."
+        )
+
     pending_review = (
         source_health_df[parse_bool_series(source_health_df["pending_review"])]
         if not source_health_df.empty and "pending_review" in source_health_df.columns

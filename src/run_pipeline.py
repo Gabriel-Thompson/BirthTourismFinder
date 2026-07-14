@@ -24,6 +24,11 @@ from src.connectors.arcgis.arcgis_connector import DEFAULT_ENTITIES_PATH as DEFA
 from src.connectors.arcgis.arcgis_connector import DEFAULT_RELATIONSHIPS_PATH as DEFAULT_ARCGIS_RELATIONSHIPS_PATH
 from src.connectors.county_clerk.local_file_connector import DEFAULT_COUNTY_CLERK_INPUT_PATH
 from src.connectors.county_property.local_file_connector import DEFAULT_COUNTY_PROPERTY_INPUT_PATH
+from src.connectors.nppes.api_connector import NPPESAPIConnector
+from src.connectors.nppes.bulk_file_connector import NPPESBulkFileConnector
+from src.connectors.nppes.correlation import generate_nppes_correlations
+from src.connectors.nppes.api_connector import write_csv as write_nppes_csv
+from src.connectors.nppes.api_connector import write_json as write_nppes_json
 from src.connectors.open_data_api import DEFAULT_ENTITIES_PATH as DEFAULT_API_ENTITIES_PATH
 from src.connectors.open_data_api import DEFAULT_RELATIONSHIPS_PATH as DEFAULT_API_RELATIONSHIPS_PATH
 from src.connectors.source_manifest import ensure_local_only_path, validate_source
@@ -76,8 +81,16 @@ DEFAULT_COUNTY_CLERK_ENTITIES_PATH = DEFAULT_PROCESSED_DIR / "county_clerk_entit
 DEFAULT_COUNTY_CLERK_RELATIONSHIPS_PATH = DEFAULT_PROCESSED_DIR / "county_clerk_relationships.csv"
 DEFAULT_COUNTY_PROPERTY_ENTITIES_PATH = DEFAULT_PROCESSED_DIR / "county_property_entities.csv"
 DEFAULT_COUNTY_PROPERTY_RELATIONSHIPS_PATH = DEFAULT_PROCESSED_DIR / "county_property_relationships.csv"
+DEFAULT_NPPES_PROVIDERS_PATH = DEFAULT_PROCESSED_DIR / "nppes_providers.csv"
+DEFAULT_NPPES_ENTITIES_PATH = DEFAULT_PROCESSED_DIR / "nppes_entities.csv"
+DEFAULT_NPPES_RELATIONSHIPS_PATH = DEFAULT_PROCESSED_DIR / "nppes_relationships.csv"
+DEFAULT_NPPES_TAXONOMIES_PATH = DEFAULT_PROCESSED_DIR / "nppes_taxonomies.csv"
+DEFAULT_NPPES_SUMMARY_PATH = DEFAULT_PROCESSED_DIR / "nppes_import_summary.json"
+DEFAULT_NPPES_DIAGNOSTICS_PATH = DEFAULT_PROCESSED_DIR / "nppes_import_diagnostics.csv"
+DEFAULT_NPPES_MANIFEST_PATH = DEFAULT_PROCESSED_DIR / "nppes_import_manifest.json"
 DEFAULT_API_SOURCE_NAME = "sample_api"
 DEFAULT_ARCGIS_SOURCE_NAME = "florida_county_arcgis_parcels"
+DEFAULT_NPPES_SOURCE_NAME = "nppes_npi"
 RESET_FILE_PATTERNS = ("*.csv", "*.parquet", "*.json")
 
 
@@ -148,6 +161,19 @@ def clear_lead_packages(package_root: Path, workspace_root: Optional[Path] = Non
     return deleted
 
 
+def _taxonomy_code_from_filter(value: str | None) -> str | None:
+    candidate = str(value or "").strip()
+    if not candidate:
+        return None
+    compact = candidate.replace("-", "").replace(" ", "")
+    return candidate if compact.isalnum() and len(compact) <= 12 else None
+
+
+def _taxonomy_description_from_filter(value: str | None) -> str | None:
+    candidate = str(value or "").strip()
+    return candidate or None
+
+
 def run_pipeline(
     records: int = 250,
     source_dir: Optional[Path | str] = None,
@@ -159,6 +185,7 @@ def run_pipeline(
     entity_risk_path: Optional[Path | str] = None,
     include_connectors: bool = False,
     include_sunbiz: bool = False,
+    include_nppes: bool = False,
     sunbiz_county: str = "Hillsborough",
     sunbiz_city: str | None = None,
     sunbiz_zip: str | None = None,
@@ -168,12 +195,23 @@ def run_pipeline(
     sunbiz_max_records: int = 100,
     sunbiz_page_size: int | None = None,
     sunbiz_mock: bool = False,
+    nppes_api: bool = False,
+    nppes_bulk_file: Path | str | None = None,
+    nppes_mock: bool = False,
+    nppes_state: str = "FL",
+    nppes_city: str | None = None,
+    nppes_postal_code: str | None = None,
+    nppes_postal_prefix: str | None = None,
+    nppes_taxonomy: str | None = None,
+    nppes_enumeration_type: str | None = None,
+    nppes_max_records: int | None = None,
+    nppes_chunk_size: int | None = None,
     run_health_check: bool = False,
     reset: bool = False,
     clear_lead_packages_flag: bool = False,
 ) -> None:
     pipeline_start = time.time()
-    total_steps = 11 + (1 if include_connectors or include_sunbiz else 0) + (1 if run_health_check else 0) + (1 if reset else 0) + (1 if clear_lead_packages_flag else 0)
+    total_steps = 11 + (1 if include_connectors or include_sunbiz or include_nppes else 0) + (1 if run_health_check else 0) + (1 if reset else 0) + (1 if clear_lead_packages_flag else 0)
     source_path = Path(source_dir or DEFAULT_SOURCE_DIR)
     db_path = Path(output_db or DEFAULT_OUTPUT_DB)
     processed_path = Path(processed_dir or DEFAULT_PROCESSED_DIR)
@@ -200,7 +238,9 @@ def run_pipeline(
     print(f"Pipeline: processed dir {processed_path}")
     print(f"Pipeline: include_connectors={include_connectors}")
     print(f"Pipeline: include_sunbiz={include_sunbiz}")
+    print(f"Pipeline: include_nppes={include_nppes}")
     print(f"Pipeline: sunbiz_mode={'mock' if sunbiz_mock else 'live'}")
+    print(f"Pipeline: nppes_mode={'mock' if nppes_mock else 'bulk' if nppes_bulk_file else 'api'}")
     print(f"Pipeline: run_health_check={run_health_check}")
     print(f"Pipeline: reset={reset}")
     print(f"Pipeline: clear_lead_packages={clear_lead_packages_flag}")
@@ -253,11 +293,61 @@ def run_pipeline(
 
     connector_entity_paths: list[Path] = []
     connector_relationship_paths: list[Path] = []
-    if include_connectors or include_sunbiz:
+    if include_connectors or include_sunbiz or include_nppes:
         print(f"Step {current_step}/{total_steps}: Ingest connector data")
         connector_input_root = source_path.parents[0]
         sunbiz_entities_path = processed_path / "sunbiz_entities.csv"
         sunbiz_relationships_path = processed_path / "sunbiz_relationships.csv"
+        nppes_entities_path = processed_path / DEFAULT_NPPES_ENTITIES_PATH.name
+        nppes_relationships_path = processed_path / DEFAULT_NPPES_RELATIONSHIPS_PATH.name
+
+        if include_nppes:
+            try:
+                nppes_mode = "bulk" if nppes_bulk_file else "mock" if nppes_mock else "api"
+                print(f"  Running NPPES import for source {DEFAULT_NPPES_SOURCE_NAME} in {nppes_mode} mode")
+                if nppes_bulk_file:
+                    connector = NPPESBulkFileConnector(
+                        input_path=nppes_bulk_file,
+                        state=nppes_state,
+                        city=nppes_city,
+                        postal_code=nppes_postal_code,
+                        postal_prefix=nppes_postal_prefix,
+                        taxonomy_code=_taxonomy_code_from_filter(nppes_taxonomy),
+                        taxonomy_description=_taxonomy_description_from_filter(nppes_taxonomy),
+                        enumeration_type=nppes_enumeration_type,
+                        chunk_size=nppes_chunk_size,
+                        max_records=nppes_max_records,
+                        output_dir=processed_path,
+                    )
+                else:
+                    validate_source(DEFAULT_NPPES_SOURCE_NAME, require_live_access=not nppes_mock)
+                    connector = NPPESAPIConnector(
+                        state=nppes_state,
+                        city=nppes_city,
+                        postal_code=nppes_postal_code,
+                        taxonomy_description=_taxonomy_description_from_filter(nppes_taxonomy),
+                        enumeration_type=nppes_enumeration_type,
+                        max_records=nppes_max_records,
+                        mock=nppes_mock,
+                        output_dir=processed_path,
+                    )
+                provider_rows, entity_rows, relationship_rows, taxonomy_rows, summary, manifest = connector.run()
+                write_nppes_csv(processed_path / DEFAULT_NPPES_PROVIDERS_PATH.name, provider_rows)
+                write_nppes_csv(nppes_entities_path, entity_rows)
+                write_nppes_csv(nppes_relationships_path, relationship_rows)
+                write_nppes_csv(processed_path / DEFAULT_NPPES_TAXONOMIES_PATH.name, taxonomy_rows)
+                write_nppes_csv(processed_path / DEFAULT_NPPES_DIAGNOSTICS_PATH.name, connector.last_diagnostics)
+                write_nppes_json(processed_path / DEFAULT_NPPES_SUMMARY_PATH.name, summary)
+                write_nppes_json(processed_path / DEFAULT_NPPES_MANIFEST_PATH.name, manifest)
+                print(f"  Wrote NPPES providers to {processed_path / DEFAULT_NPPES_PROVIDERS_PATH.name}")
+                print(f"  Wrote NPPES entities to {nppes_entities_path}")
+                print(f"  Wrote NPPES relationships to {nppes_relationships_path}")
+                connector_entity_paths.append(nppes_entities_path)
+                connector_relationship_paths.append(nppes_relationships_path)
+            except ValueError as exc:
+                print(f"  Skipping NPPES source {DEFAULT_NPPES_SOURCE_NAME}: {exc}")
+            except Exception as exc:
+                print(f"  Skipping NPPES source {DEFAULT_NPPES_SOURCE_NAME}: connector execution failed ({exc}).")
 
         if include_sunbiz:
             try:
@@ -539,6 +629,16 @@ def run_pipeline(
         f"review={cross_source_summary['review_match_count']} "
         f"rejected={cross_source_summary['rejected_match_count']}"
     )
+    if include_nppes:
+        try:
+            nppes_quality = generate_nppes_correlations(processed_dir=processed_path, append_to_cross_source=True)
+            print(
+                f"  NPPES correlations: sunbiz_candidates={nppes_quality.get('npi_to_sunbiz_candidates', 0)} "
+                f"parcel_candidates={nppes_quality.get('npi_to_parcel_candidates', 0)} "
+                f"three_source_paths={nppes_quality.get('three_source_paths', 0)}"
+            )
+        except Exception as exc:
+            print(f"  NPPES correlation refresh skipped: {exc}")
     if include_sunbiz:
         try:
             _, quality_report = build_sunbiz_parcel_matches(
@@ -715,6 +815,11 @@ def main() -> None:
         action="store_true",
         help="Run the authenticated Sunbiz Daily API connector and merge its outputs into the local pipeline.",
     )
+    parser.add_argument(
+        "--include-nppes",
+        action="store_true",
+        help="Run the official CMS NPPES/NPI connector and merge its outputs into the local pipeline.",
+    )
     parser.add_argument("--sunbiz-county", default="Hillsborough", help="County filter passed to the Sunbiz Daily connector.")
     parser.add_argument("--sunbiz-city", default=None, help="Optional city filter passed to the Sunbiz Daily connector.")
     parser.add_argument("--sunbiz-zip", default=None, help="Optional ZIP filter passed to the Sunbiz Daily connector.")
@@ -724,6 +829,17 @@ def main() -> None:
     parser.add_argument("--sunbiz-max-records", type=int, default=100, help="Maximum Sunbiz filings to fetch in a pipeline run.")
     parser.add_argument("--sunbiz-page-size", type=int, default=None, help="Optional Sunbiz page size override.")
     parser.add_argument("--sunbiz-mock", action="store_true", help="Run the Sunbiz Daily connector in explicit mock mode.")
+    parser.add_argument("--nppes-api", action="store_true", help="Prefer the official NPPES API mode when include-nppes is enabled.")
+    parser.add_argument("--nppes-bulk-file", default=None, help="Path to a locally downloaded official NPPES CSV file.")
+    parser.add_argument("--nppes-mock", action="store_true", help="Run the NPPES connector in explicit mock mode.")
+    parser.add_argument("--nppes-state", default="FL", help="State filter passed to the NPPES connector.")
+    parser.add_argument("--nppes-city", default=None, help="Optional city filter passed to the NPPES connector.")
+    parser.add_argument("--nppes-postal-code", default=None, help="Optional postal code filter passed to the NPPES connector.")
+    parser.add_argument("--nppes-postal-prefix", default=None, help="Optional postal prefix for NPPES bulk mode.")
+    parser.add_argument("--nppes-taxonomy", default=None, help="Optional taxonomy description or code filter for NPPES.")
+    parser.add_argument("--nppes-enumeration-type", default=None, help="Optional NPPES enumeration type filter.")
+    parser.add_argument("--nppes-max-records", type=int, default=None, help="Maximum NPPES records to process in one run.")
+    parser.add_argument("--nppes-chunk-size", type=int, default=None, help="Chunk size for local NPPES bulk processing.")
     parser.add_argument(
         "--health-check",
         action="store_true",
@@ -753,6 +869,7 @@ def main() -> None:
             entity_risk_path=args.entity_risk_path,
             include_connectors=args.include_connectors,
             include_sunbiz=args.include_sunbiz,
+            include_nppes=args.include_nppes,
             sunbiz_county=args.sunbiz_county,
             sunbiz_city=args.sunbiz_city,
             sunbiz_zip=args.sunbiz_zip,
@@ -762,6 +879,17 @@ def main() -> None:
             sunbiz_max_records=args.sunbiz_max_records,
             sunbiz_page_size=args.sunbiz_page_size,
             sunbiz_mock=args.sunbiz_mock,
+            nppes_api=args.nppes_api,
+            nppes_bulk_file=args.nppes_bulk_file,
+            nppes_mock=args.nppes_mock,
+            nppes_state=args.nppes_state,
+            nppes_city=args.nppes_city,
+            nppes_postal_code=args.nppes_postal_code,
+            nppes_postal_prefix=args.nppes_postal_prefix,
+            nppes_taxonomy=args.nppes_taxonomy,
+            nppes_enumeration_type=args.nppes_enumeration_type,
+            nppes_max_records=args.nppes_max_records,
+            nppes_chunk_size=args.nppes_chunk_size,
             run_health_check=args.health_check,
             reset=args.reset,
             clear_lead_packages_flag=args.clear_lead_packages,

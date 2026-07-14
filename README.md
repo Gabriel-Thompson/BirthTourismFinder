@@ -64,6 +64,8 @@ Pipeline:
 python src/run_pipeline.py
 python src/run_pipeline.py --reset
 python src/run_pipeline.py --reset --include-connectors
+python src/run_pipeline.py --include-nppes --nppes-mock --include-connectors
+python src/run_pipeline.py --include-nppes --nppes-mock --include-sunbiz --sunbiz-mock --include-connectors --health-check
 python src/run_pipeline.py --reset --clear-lead-packages --include-connectors
 python src/run_pipeline.py --reset --clear-lead-packages --include-connectors --health-check
 python src/run_pipeline.py --include-connectors
@@ -96,6 +98,14 @@ python -m src.connectors.sunbiz_daily_connector --zip 336 --status active --max-
 python -m src.connectors.sunbiz_daily_connector --start-date 2026-01-01 --end-date 2026-07-13 --max-records 500
 python src/run_pipeline.py --include-sunbiz --include-connectors --health-check
 python src/run_pipeline.py --include-sunbiz --sunbiz-mock --sunbiz-county Hillsborough --sunbiz-max-records 100 --include-connectors --health-check
+```
+
+CMS NPPES / NPI:
+```bash
+python -m src.connectors.nppes.api_connector --mock --state FL --city Tampa --max-records 100
+python -m src.connectors.nppes.bulk_file_connector --input tests/fixtures/nppes/nppes_sample.csv --state FL --postal-prefix 336
+python src/run_pipeline.py --include-nppes --nppes-mock --include-connectors
+python src/run_pipeline.py --include-nppes --nppes-mock --include-sunbiz --sunbiz-mock --include-connectors --health-check
 ```
 
 Reporting and validation:
@@ -191,6 +201,16 @@ The `Source Health` page includes a `Sunbiz Daily` section that shows:
 - asynchronous jobs
 - truncated results
 - rate-limit remaining
+
+It also includes a `CMS NPPES / NPI` section that shows:
+- providers normalized
+- individual and organization provider counts
+- practice and mailing addresses
+- taxonomy records
+- deactivated NPIs
+- incomplete records
+- import mode and filters
+- last successful import
 
 Local workstation features:
 - persisted analyst notes, reviewer, disposition, bookmark, follow-up, and priority override in `data/processed/analyst_lead_state.csv`
@@ -676,6 +696,12 @@ Before enabling any live connector:
 - keep `live_access_allowed` disabled unless automated access is clearly permitted
 - preserve source lineage in config and processed outputs
 - keep restricted or private records out of the repository
+
+For CMS NPPES/NPI specifically:
+- use only the official CMS NPI Registry API or official CMS dissemination files
+- do not scrape the NPI Registry website
+- remember that NPPES data is self-reported or submitted by authorized parties
+- do not treat NPI presence as proof of active licensing, enrollment, billing, ownership, or wrongdoing
 
 ## Investigator Limitations
 

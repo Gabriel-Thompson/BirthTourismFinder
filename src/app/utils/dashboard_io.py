@@ -612,6 +612,13 @@ def load_cross_source_matches(path: Path | str = CROSS_SOURCE_MATCHES_PATH) -> p
         "sunbiz_corporation_number",
         "sunbiz_business_name",
         "parcel_id",
+        "npi",
+        "provider_name",
+        "provider_type",
+        "enumeration_type",
+        "taxonomy",
+        "deactivated_status",
+        "three_source_only",
         "match_type",
         "match_confidence",
         "address_match_scope",
@@ -624,7 +631,10 @@ def load_cross_source_matches(path: Path | str = CROSS_SOURCE_MATCHES_PATH) -> p
 
     def transform(df: pd.DataFrame) -> pd.DataFrame:
         with_numeric_columns(df, ["confidence", "independent_real_source_count", "match_confidence", "name_frequency"])
-        with_boolean_columns(df, ["contains_real_data", "contains_synthetic_data", "common_name_downgraded", "privacy_redacted"])
+        with_boolean_columns(
+            df,
+            ["contains_real_data", "contains_synthetic_data", "common_name_downgraded", "privacy_redacted", "three_source_only"],
+        )
         df["source_name"] = df["left_source_name"].astype(str) + "|" + df["right_source_name"].astype(str)
         df["source_type"] = df["left_source_type"].astype(str) + "|" + df["right_source_type"].astype(str)
         return df
